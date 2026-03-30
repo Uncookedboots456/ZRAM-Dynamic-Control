@@ -1,0 +1,6 @@
+id=zram_12g_uncookedboot
+name=ZRAM 动态控制核心 (纯脚本版)
+version=v1.0
+versionCode=200
+author=UncookedBoot
+description=完全去系统挂载化(Script-Only)架构，极致兼容所有 Root 管理器。开机延时自动应用，支持 Action 面板一键热重载与状态监控。
