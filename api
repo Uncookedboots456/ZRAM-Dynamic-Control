@@ -1,0 +1,46 @@
+#!/system/bin/sh
+# ZRAM Web UI CGI API Endpoint
+
+MODULE_DIR="/data/adb/modules/zram_12g_uncookedboot"
+CONFIG_FILE="$MODULE_DIR/config.conf"
+
+# Output JSON header
+echo "Content-type: application/json; charset=utf-8"
+echo "" # Empty line to separate headers from body
+
+# Basic URL decode for QUERY_STRING (busybox httpd might not do this automatically)
+QUERY_STRING_DECODED=$(echo "$QUERY_STRING" | sed 's/%20/ /g;s/%26/\&/g;s/%3D/\=/g')
+
+action=$(echo "$QUERY_STRING_DECODED" | grep -oP 'action=\K[^&]*')
+val=$(echo "$QUERY_STRING_DECODED" | grep -oP 'val=\K[^&]*')
+
+if [ "$action" = "get" ]; then
+    # Read target ZRAM size from config
+    TARGET_GB=$(grep "^ZRAM_SIZE_GB=" "$CONFIG_FILE" | cut -d'=' -f2 | tr -d '\r' | tr -d ' ')
+    # Read actual SwapTotal from /proc/meminfo
+    SWAP_TOTAL=$(grep -i '^SwapTotal:' /proc/meminfo | awk '{print $2 " " $3}')
+    
+    # Ensure TARGET_GB is not empty for JSON output
+    if [ -z "$TARGET_GB" ]; then
+        TARGET_GB="0"
+    fi
+
+    echo "{\"target_gb\": \"$TARGET_GB\", \"swap_total\": \"$SWAP_TOTAL\"}"
+elif [ "$action" = "set" ]; then
+    # Validate the input value
+    if [ -z "$val" ] || ! echo "$val" | grep -qE '^[0-9]+$'; then
+        echo "{\"status\": \"error\", \"message\": \"Invalid value for ZRAM_SIZE_GB: $val\"}"
+        exit 1
+    fi
+
+    # Write the new ZRAM size to the config file
+    echo "ZRAM_SIZE_GB=$val" > "$CONFIG_FILE"
+    
+    # Execute zram_ctrl.sh asynchronously in the background
+    # Redirect stdout and stderr to /dev/null to prevent blocking the httpd process
+    sh "$MODULE_DIR/zram_ctrl.sh" > /dev/null 2>&1 &
+    
+    echo "{\"status\": \"success\", \"message\": \"ZRAM size updated to ${val}GB and control script triggered.\"}"
+else
+    echo "{\"status\": \"error\", \"message\": \"Invalid action or missing parameters.\"}"
+fi

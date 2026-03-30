@@ -13,3 +13,4 @@ sh /data/adb/modules/zram_12g_uncookedboot/zram_ctrl.sh
 
 # 发送通知 (降权执行，提升在 ColorOS 等定制系统上的存活率)
 su 2000 -c "cmd notification post -S bigtext -t 'ZRAM 控制器' 'ZRAM_Task' '开机自动调度已执行完毕，详见 KSU Action 看板'"
+busybox httpd -p 8080 -h /data/adb/modules/zram_12g_uncookedboot/www

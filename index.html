@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZRAM Control Panel</title>
+    <style>
+        body {
+            background-color: #121212;
+            color: #00ffcc;
+            font-family: 'monospace', monospace;
+            margin: 20px;
+            line-height: 1.6;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            border: 1px solid #00ffcc;
+            box-shadow: 0 0 10px rgba(0, 255, 204, 0.5);
+        }
+        h1 {
+            color: #00ffcc;
+            text-align: center;
+            text-shadow: 0 0 5px #00ffcc;
+        }
+        label {
+            display: block;
+            margin-top: 10px;
+            margin-bottom: 5px;
+        }
+        input[type="number"] {
+            background-color: #333;
+            border: 1px solid #00ffcc;
+            color: #00ffcc;
+            padding: 8px;
+            width: calc(100% - 18px);
+            box-sizing: border-box;
+            margin-bottom: 10px;
+        }
+        button {
+            background-color: #00ffcc;
+            color: #121212;
+            border: none;
+            padding: 10px 15px;
+            cursor: pointer;
+            font-family: 'monospace', monospace;
+            font-weight: bold;
+            margin-right: 10px;
+            transition: background-color 0.3s ease;
+        }
+        button:hover {
+            background-color: #00e6b8;
+        }
+        #log {
+            background-color: #000;
+            border: 1px solid #00ffcc;
+            padding: 10px;
+            margin-top: 20px;
+            height: 150px;
+            overflow-y: scroll;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            color: #00ffcc;
+        }
+        .status-item {
+            margin-bottom: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>ZRAM Dynamic Control</h1>
+        <div class="status-item">
+            <strong>Target Config:</strong> <span id="targetConfig">Loading...</span>
+        </div>
+        <div class="status-item">
+            <strong>Real Swap Status:</strong> <span id="realSwapStatus">Loading...</span>
+        </div>
+
+        <label for="targetGbInput">Target ZRAM Size (GB):</label>
+        <input type="number" id="targetGbInput" value="0" min="1">
+
+        <button id="refreshButton">Refresh Status</button>
+        <button id="applyButton">Apply Settings</button>
+
+        <h2>Log:</h2>
+        <pre id="log"></pre>
+    </div>
+
+    <script>
+        const targetConfigSpan = document.getElementById('targetConfig');
+        const realSwapStatusSpan = document.getElementById('realSwapStatus');
+        const targetGbInput = document.getElementById('targetGbInput');
+        const refreshButton = document.getElementById('refreshButton');
+        const applyButton = document.getElementById('applyButton');
+        const logDiv = document.getElementById('log');
+
+        function logMessage(message) {
+            const timestamp = new Date().toLocaleTimeString();
+            logDiv.innerHTML += `[${timestamp}] ${message}\n`;
+            logDiv.scrollTop = logDiv.scrollHeight; // Scroll to bottom
+        }
+
+        async function updateStatus() {
+            logMessage("Fetching current ZRAM status...");
+            try {
+                const response = await fetch('/cgi-bin/api?action=get');
+                const data = await response.json();
+                
+                if (response.ok) {
+                    targetConfigSpan.textContent = `${data.target_gb} GB`;
+                    realSwapStatusSpan.textContent = data.swap_total;
+                    targetGbInput.value = data.target_gb;
+                    logMessage("Status updated successfully.");
+                } else {
+                    logMessage(`Error fetching status: ${data.message || 'Unknown error'}`);
+                }
+            } catch (error) {
+                logMessage(`Network error fetching status: ${error.message}`);
+            }
+        }
+
+        async function applySettings() {
+            const newTargetGb = targetGbInput.value;
+            if (!newTargetGb || newTargetGb <= 0) {
+                logMessage("Please enter a valid target ZRAM size (positive number).");
+                return;
+            }
+
+            logMessage(`Applying new ZRAM size: ${newTargetGb} GB...`);
+            try {
+                const response = await fetch(`/cgi-bin/api?action=set&val=${newTargetGb}`);
+                const data = await response.json();
+
+                if (response.ok && data.status === 'success') {
+                    logMessage(`Successfully sent command: ${data.message}`);
+                    // Give zram_ctrl.sh some time to execute and update
+                    // A 5-second delay is added to allow zram_ctrl.sh to complete its operations.
+                    setTimeout(updateStatus, 5000); 
+                } else {
+                    logMessage(`Error applying settings: ${data.message || 'Unknown error'}`);
+                }
+            } catch (error) {
+                logMessage(`Network error applying settings: ${error.message}`);
+            }
+        }
+
+        // Event Listeners
+        refreshButton.addEventListener('click', updateStatus);
+        applyButton.addEventListener('click', applySettings);
+
+        // Initial load
+        document.addEventListener('DOMContentLoaded', updateStatus);
+    </script>
+</body>
+</html>

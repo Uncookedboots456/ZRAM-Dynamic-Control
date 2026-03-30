@@ -12,6 +12,7 @@ set_perm $MODPATH/zram_ctrl.sh 0 0 0755
 set_perm $MODPATH/action.sh 0 0 0755
 set_perm $MODPATH/service.sh 0 0 0755
 
+set_perm_recursive $MODPATH/www/cgi-bin 0 0 0755 0755
 ui_print "---------------------------------------"
 ui_print "- 部署完成！完全解耦 Magic Mount。"
 ui_print "- 重启后生效，支持通过管理器操作按钮随时控制。"
