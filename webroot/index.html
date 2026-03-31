@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZRAM Dynamic Control</title>
+    <style>
+        body {
+            font-family: 'Cascadia Code', 'Fira Code', 'monospace', sans-serif;
+            background-color: #1e1e2e; /* Dark hacker theme background */
+            color: #cdd6f4; /* Light text color */
+            margin: 0;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        h1 {
+            color: #89b4fa; /* Accent color */
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: #282a36; /* Slightly lighter dark background for container */
+            padding: 25px;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+        }
+        .section-title {
+            color: #a6e3a1; /* Green accent */
+            margin-top: 20px;
+            margin-bottom: 10px;
+            border-bottom: 1px solid #44475a;
+            padding-bottom: 5px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+        }
+        .form-group label {
+            flex: 0 0 200px; /* Fixed width for labels */
+            margin-right: 15px;
+            color: #f5e0dc; /* Pinkish accent for labels */
+            font-weight: bold;
+        }
+        .form-group input[type="number"],
+        .form-group input[type="text"],
+        .form-group select {
+            flex-grow: 1;
+            padding: 10px;
+            border: 1px solid #44475a;
+            border-radius: 4px;
+            background-color: #333642;
+            color: #f8f8f2;
+            font-size: 1em;
+        }
+        .form-group input[type="number"]:focus,
+        .form-group input[type="text"]:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: #89b4fa;
+            box-shadow: 0 0 0 2px rgba(137, 180, 250, 0.3);
+        }
+        button {
+            display: block;
+            width: 100%;
+            padding: 12px 20px;
+            background-color: #89b4fa; /* Accent color for button */
+            color: #1e1e2e;
+            border: none;
+            border-radius: 4px;
+            font-size: 1.1em;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+            margin-top: 30px;
+        }
+        button:hover {
+            background-color: #74a0e0;
+        }
+        .status-info {
+            background-color: #333642;
+            padding: 15px;
+            border-radius: 4px;
+            margin-top: 20px;
+            border: 1px solid #44475a;
+        }
+        .status-info p {
+            margin: 5px 0;
+            color: #f8f8f2;
+        }
+        #log {
+            background-color: #1a1b26; /* Even darker for log */
+            color: #cdd6f4;
+            padding: 15px;
+            border-radius: 4px;
+            margin-top: 20px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            max-height: 400px;
+            overflow-y: auto;
+            border: 1px solid #44475a;
+        }
+        .error {
+            color: #f38ba8; /* Red accent for errors */
+        }
+        .warning {
+            color: #fab387; /* Orange accent for warnings */
+        }
+        .success {
+            color: #a6e3a1; /* Green accent for success */
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>ZRAM Dynamic Control</h1>
+
+        <div class="section-title">Current System Status</div>
+        <div class="status-info">
+            <p>MemAvailable: <span id="memAvailable">Loading...</span></p>
+            <p>SwapTotal: <span id="swapTotal">Loading...</span></p>
+            <p>SwapFree: <span id="swapFree">Loading...</span></p>
+        </div>
+
+        <div class="section-title">Configuration</div>
+        <div class="form-group">
+            <label for="zramSize">ZRAM Size (GB):</label>
+            <input type="number" id="zramSize" value="12" min="1" step="1">
+        </div>
+        <div class="form-group">
+            <label for="compAlgorithm">Compression Algorithm:</label>
+            <select id="compAlgorithm">
+                <option value="zstd">zstd</option>
+                <option value="lz4">lz4</option>
+                <option value="lzo">lzo</option>
+                <option value="deflate">deflate</option>
+                <option value="842">842</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="swappiness">Swappiness (0-200):</label>
+            <input type="number" id="swappiness" value="100" min="0" max="200" step="1">
+        </div>
+        <div class="form-group">
+            <label for="watermarkScaleFactor">Watermark Scale Factor (0-1000):</label>
+            <input type="number" id="watermarkScaleFactor" value="150" min="0" max="1000" step="1">
+        </div>
+        <div class="form-group">
+            <label for="bootDelaySec">Boot Delay (seconds):</label>
+            <input type="number" id="bootDelaySec" value="60" min="0" step="1">
+        </div>
+        <div class="form-group">
+            <label for="safeMemThresholdMb">Safe Mem Threshold (MB):</label>
+            <input type="number" id="safeMemThresholdMb" value="1024" min="0" step="1">
+        </div>
+
+        <button id="applyButton">Apply Configuration & Rebuild ZRAM</button>
+
+        <div class="section-title">Execution Log</div>
+        <pre id="log">Waiting for user action...</pre>
+    </div>
+
+    <script>
+        const MODULE_PATH = "/data/adb/modules/zram_12g_uncookedboot";
+        const CONFIG_FILE = `${MODULE_PATH}/config.conf`;
+        const ZRAM_CTRL_SCRIPT = `${MODULE_PATH}/zram_ctrl.sh`;
+
+        // Helper to safely execute shell commands and log output
+        async function executeShellCommand(command, fullOutput = false) {
+            const logElement = document.getElementById('log');
+            logElement.textContent += `\n$ ${command}\n`;
+            try {
+                let result;
+                if (fullOutput && typeof ksu.full_exec === 'function') {
+                    result = await ksu.full_exec(command);
+                    logElement.textContent += result.stdout;
+                    if (result.stderr) {
+                        logElement.textContent += `\n${result.stderr}`;
+                    }
+                    if (result.code !== 0) {
+                        logElement.textContent += `\nCommand failed with exit code: ${result.code}\n`;
+                        logElement.classList.add('error');
+                    } else {
+                        logElement.classList.remove('error');
+                    }
+                } else if (typeof ksu.exec === 'function') {
+                    result = await ksu.exec(command);
+                    logElement.textContent += result;
+                } else {
+                    logElement.textContent += `\nError: ksu.exec or ksu.full_exec not available.\n`;
+                    logElement.classList.add('error');
+                    return { code: 1, stdout: '', stderr: 'ksu functions not available' };
+                }
+                logElement.scrollTop = logElement.scrollHeight; // Scroll to bottom
+                return result;
+            } catch (e) {
+                logElement.textContent += `\nError executing command: ${e.message}\n`;
+                logElement.classList.add('error');
+                logElement.scrollTop = logElement.scrollHeight;
+                return { code: 1, stdout: '', stderr: e.message };
+            }
+        }
+
+        // Function to read config and populate UI
+        async function readConfigAndPopulateUI() {
+            const configContent = await executeShellCommand(`cat ${CONFIG_FILE}`);
+            if (configContent && typeof configContent === 'string') {
+                const lines = configContent.split('\n');
+                lines.forEach(line => {
+                    const parts = line.split('=');
+                    if (parts.length === 2) {
+                        const key = parts[0].trim();
+                        const value = parts[1].trim();
+                        switch (key) {
+                            case 'ZRAM_SIZE_GB':
+                                document.getElementById('zramSize').value = value;
+                                break;
+                            case 'COMP_ALGORITHM':
+                                document.getElementById('compAlgorithm').value = value;
+                                break;
+                            case 'SWAPPINESS':
+                                document.getElementById('swappiness').value = value;
+                                break;
+                            case 'WATERMARK_SCALE_FACTOR':
+                                document.getElementById('watermarkScaleFactor').value = value;
+                                break;
+                            case 'BOOT_DELAY_SEC':
+                                document.getElementById('bootDelaySec').value = value;
+                                break;
+                            case 'SAFE_MEM_THRESHOLD_MB':
+                                document.getElementById('safeMemThresholdMb').value = value;
+                                break;
+                        }
+                    }
+                });
+            } else {
+                document.getElementById('log').textContent += "\nError: Could not read config.conf.\n";
+                document.getElementById('log').classList.add('error');
+            }
+        }
+
+        // Function to read system info
+        async function readSystemInfo() {
+            const meminfo = await executeShellCommand('cat /proc/meminfo');
+            if (meminfo && typeof meminfo === 'string') {
+                const memAvailableMatch = meminfo.match(/MemAvailable:\s*(\d+)\s*kB/);
+                const swapTotalMatch = meminfo.match(/SwapTotal:\s*(\d+)\s*kB/);
+                const swapFreeMatch = meminfo.match(/SwapFree:\s*(\d+)\s*kB/);
+
+                if (memAvailableMatch) {
+                    document.getElementById('memAvailable').textContent = `${(parseInt(memAvailableMatch[1]) / 1024).toFixed(2)} MB`;
+                }
+                if (swapTotalMatch) {
+                    document.getElementById('swapTotal').textContent = `${(parseInt(swapTotalMatch[1]) / 1024).toFixed(2)} MB`;
+                }
+                if (swapFreeMatch) {
+                    document.getElementById('swapFree').textContent = `${(parseInt(swapFreeMatch[1]) / 1024).toFixed(2)} MB`;
+                }
+            } else {
+                document.getElementById('log').textContent += "\nError: Could not read /proc/meminfo.\n";
+                document.getElementById('log').classList.add('error');
+            }
+        }
+
+        // Event listener for Apply button
+        document.getElementById('applyButton').addEventListener('click', async () => {
+            document.getElementById('log').textContent = 'Applying configuration...\n';
+            document.getElementById('log').classList.remove('error', 'warning', 'success');
+
+            const zramSize = document.getElementById('zramSize').value;
+            const compAlgorithm = document.getElementById('compAlgorithm').value;
+            const swappiness = document.getElementById('swappiness').value;
+            const watermarkScaleFactor = document.getElementById('watermarkScaleFactor').value;
+            const bootDelaySec = document.getElementById('bootDelaySec').value;
+            const safeMemThresholdMb = document.getElementById('safeMemThresholdMb').value;
+
+            // Construct the new config content
+            const newConfigContent = `ZRAM_SIZE_GB=${zramSize}\n` +
+                                     `COMP_ALGORITHM=${compAlgorithm}\n` +
+                                     `SWAPPINESS=${swappiness}\n` +
+                                     `WATERMARK_SCALE_FACTOR=${watermarkScaleFactor}\n` +
+                                     `BOOT_DELAY_SEC=${bootDelaySec}\n` +
+                                     `SAFE_MEM_THRESHOLD_MB=${safeMemThresholdMb}\n`;
+
+            // Write new config to file
+            const writeCommand = `echo "${newConfigContent}" > ${CONFIG_FILE}`;
+            const writeResult = await executeShellCommand(writeCommand);
+
+            if (writeResult.code === 0 || typeof writeResult === 'string') { // ksu.exec returns string, ksu.full_exec returns object
+                document.getElementById('log').textContent += "\nConfiguration saved. Executing ZRAM control script...\n";
+                // Execute the core script and capture its full output
+                const scriptResult = await executeShellCommand(`sh ${ZRAM_CTRL_SCRIPT}`, true);
+                if (scriptResult.code === 0) {
+                    document.getElementById('log').classList.add('success');
+                } else {
+                    document.getElementById('log').classList.add('error');
+                }
+            } else {
+                document.getElementById('log').textContent += "\nError: Failed to save configuration.\n";
+                document.getElementById('log').classList.add('error');
+            }
+            readSystemInfo(); // Refresh system info after applying
+        });
+
+        // Initial load
+        document.addEventListener('DOMContentLoaded', async () => {
+            if (typeof ksu === 'undefined' || (typeof ksu.exec === 'undefined' && typeof ksu.full_exec === 'undefined')) {
+                document.getElementById('log').textContent = "Error: KernelSU/APatch JS bridge (ksu object) not found. This page must be opened within a compatible Root Manager's WebUI.";
+                document.getElementById('log').classList.add('error');
+                document.getElementById('applyButton').disabled = true;
+                return;
+            }
+            await readConfigAndPopulateUI();
+            await readSystemInfo();
+            document.getElementById('log').textContent = "Ready. Adjust settings and click 'Apply'.";
+        });
+    </script>
+</body>
+</html>

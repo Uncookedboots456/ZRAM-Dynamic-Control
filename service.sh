@@ -1,16 +1,23 @@
 #!/system/bin/sh
-# 开机启动脚本
+# Boot-time ZRAM control script
+
+MODULE_DIR="/data/adb/modules/zram_12g_uncookedboot"
+CONFIG_FILE="$MODULE_DIR/config.conf"
 
 until [ "$(getprop sys.boot_completed)" = "1" ]; do
     sleep 2
 done
 
-# 延迟 60 秒，等待 Uperf 等其他模块释放控制权
-sleep 60
+# Read BOOT_DELAY_SEC from config.conf
+BOOT_DELAY_SEC=$(grep "^BOOT_DELAY_SEC=" "$CONFIG_FILE" | cut -d'=' -f2 | tr -d '\r' | tr -d ' ')
 
-# 后台静默调用绝对路径脚本
-sh /data/adb/modules/zram_12g_uncookedboot/zram_ctrl.sh
+# Validate BOOT_DELAY_SEC
+if [ -z "$BOOT_DELAY_SEC" ] || ! echo "$BOOT_DELAY_SEC" | grep -qE '^[0-9]+$'; then
+    BOOT_DELAY_SEC=60 # Default to 60 seconds if invalid
+fi
 
-# 发送通知 (降权执行，提升在 ColorOS 等定制系统上的存活率)
-su 2000 -c "cmd notification post -S bigtext -t 'ZRAM 控制器' 'ZRAM_Task' '开机自动调度已执行完毕，详见 KSU Action 看板'"
-busybox httpd -p 8080 -h /data/adb/modules/zram_12g_uncookedboot/www
+echo "ZRAM module: Waiting for $BOOT_DELAY_SEC seconds before initial setup..."
+sleep "$BOOT_DELAY_SEC"
+
+# Execute the core control script in the background
+sh "$MODULE_DIR/zram_ctrl.sh" &
