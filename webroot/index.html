@@ -3,88 +3,76 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>ZRAM 参数编辑器</title>
+    <title>ZRAM 极简配置</title>
     <style>
-        :root { --bg: #1e1e2e; --text: #cdd6f4; --accent: #89b4fa; --panel: #313244; }
-        * { box-sizing: border-box; } /* 防止输入框溢出屏幕 */
-        
-        body { background: var(--bg); color: var(--text); font-family: monospace; padding: 15px; margin: 0; font-size: 15px; }
-        .card { background: var(--panel); padding: 15px; border-radius: 12px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
-        h3 { margin-top: 0; color: var(--accent); border-bottom: 1px solid #45475a; padding-bottom: 10px; font-size: 18px; }
-        label { display: block; margin-bottom: 6px; color: #a6adc8; }
-        input { width: 100%; background: #181825; color: #a6adc8; border: 1px solid #45475a; padding: 14px; border-radius: 8px; margin-bottom: 15px; font-family: monospace; font-size: 15px; }
-        button { background: var(--accent); color: #11111b; border: none; padding: 16px; border-radius: 8px; width: 100%; font-weight: bold; font-size: 16px; cursor: pointer; }
-        button:active { opacity: 0.8; }
-        #log { text-align: center; margin-top: 15px; font-size: 14px; color: #a6adc8; height: 20px; }
+        body { background: #121212; color: #e0e0e0; font-family: sans-serif; padding: 20px; margin: 0; font-size: 16px; }
+        label { display: block; margin-top: 15px; margin-bottom: 8px; color: #aaa; }
+        /* 统一输入框和下拉菜单的样式 */
+        input, select, button { 
+            width: 100%; 
+            box-sizing: border-box; 
+            padding: 14px; 
+            border-radius: 8px; 
+            border: 1px solid #333; 
+            background: #222; 
+            color: #fff; 
+            font-size: 16px; 
+            outline: none;
+        }
+        input:focus, select:focus { border-color: #007bff; }
+        button { margin-top: 30px; background: #007bff; font-weight: bold; border: none; cursor: pointer; }
+        button:active { background: #0056b3; }
+        #msg { margin-top: 20px; text-align: center; font-size: 14px; color: #4caf50; height: 20px; }
     </style>
 </head>
 <body>
-    <h2>📝 ZRAM 参数编辑器</h2>
+    <h2 style="margin-top:0; color: #fff;">ZRAM 引擎设置</h2>
     
-    <div class="card">
-        <h3>⚡ 核心配置 (修改后需点击模块上的 Action 按钮重载)</h3>
-        
-        <label>ZRAM 容量 (GB):</label>
-        <input type="number" id="input-gb" placeholder="如: 12">
-        
-        <label>压缩协议 (lz4 / zstd):</label>
-        <input type="text" id="input-algo" placeholder="如: lz4">
+    <label>ZRAM 容量 (GB):</label>
+    <input type="number" id="gb" value="12">
+    
+    <label>压缩协议:</label>
+    <select id="algo">
+        <option value="lz4" selected>lz4 (极速/低延迟)</option>
+        <option value="zstd">zstd (高压/省空间)</option>
+    </select>
 
-        <label>Swappiness (0-200):</label>
-        <input type="number" id="input-swap" placeholder="如: 80">
+    <label>Swappiness (0-200):</label>
+    <input type="number" id="swap" value="80">
 
-        <label>Watermark Scale (如: 50):</label>
-        <input type="number" id="input-watermark" placeholder="如: 50">
+    <label>Watermark Scale:</label>
+    <input type="number" id="wm" value="50">
 
-        <button onclick="saveConfig()">💾 仅保存配置</button>
-        <div id="log"></div>
-    </div>
+    <button onclick="save()">💾 保存配置</button>
+    <div id="msg"></div>
 
     <script>
-        // KSU 执行包装器
-        async function runShell(cmd) {
-            if (typeof ksu !== 'undefined') {
-                try {
-                    let res = await ksu.exec(cmd);
-                    return res.stdout.trim();
-                } catch (e) { return "Error"; }
-            }
-            return "";
-        }
-
-        // 初始化：读取现有配置文件
-        async function loadConfig() {
-            let conf = await runShell("cat /data/adb/modules/zram_12g_uncookedboot/config.conf");
-            if (conf && !conf.includes("Error")) {
-                let getVal = (key) => { let m = conf.match(new RegExp("^"+key+"=(.*)", "m")); return m ? m[1].trim() : ""; };
-                document.getElementById('input-gb').value = getVal("ZRAM_SIZE_GB") || 12;
-                document.getElementById('input-algo').value = getVal("COMP_ALGORITHM") || "lz4";
-                document.getElementById('input-swap').value = getVal("SWAPPINESS") || 80;
-                document.getElementById('input-watermark').value = getVal("WATERMARK_SCALE_FACTOR") || 50;
-            }
-        }
-
-        // 仅覆盖配置文件，不执行脚本
-        async function saveConfig() {
-            let gb = document.getElementById('input-gb').value;
-            let algo = document.getElementById('input-algo').value;
-            let swap = document.getElementById('input-swap').value;
-            let watermark = document.getElementById('input-watermark').value;
+        // 极简单向写入逻辑，没有任何多余的读取动作
+        async function save() {
+            let gb = document.getElementById('gb').value;
+            let algo = document.getElementById('algo').value;
+            let swap = document.getElementById('swap').value;
+            let wm = document.getElementById('wm').value;
             
-            if(!gb || !algo || !swap || !watermark) {
-                document.getElementById('log').innerText = "❌ 参数不能留空！";
-                document.getElementById('log').style.color = "#f38ba8";
+            if(!gb || !swap || !wm) {
+                document.getElementById('msg').innerText = "❌ 请填写完整！";
+                document.getElementById('msg').style.color = "#f44336";
                 return;
             }
             
-            let confData = `ZRAM_SIZE_GB=${gb}\nCOMP_ALGORITHM=${algo}\nSWAPPINESS=${swap}\nWATERMARK_SCALE_FACTOR=${watermark}\n`;
-            await runShell(`echo "${confData}" > /data/adb/modules/zram_12g_uncookedboot/config.conf`);
+            // 拼接配置文本
+            let confData = `ZRAM_SIZE_GB=${gb}\nCOMP_ALGORITHM=${algo}\nSWAPPINESS=${swap}\nWATERMARK_SCALE_FACTOR=${wm}\n`;
             
-            document.getElementById('log').innerText = "✅ 配置文件已保存！请返回点击执行按钮。";
-            document.getElementById('log').style.color = "#a6e3a1";
+            // 写入文件
+            if (typeof ksu !== 'undefined') {
+                await ksu.exec(`echo "${confData}" > /data/adb/modules/zram_12g_uncookedboot/config.conf`);
+                document.getElementById('msg').innerText = "✅ 已保存！请返回点击 Action 按钮执行。";
+                document.getElementById('msg').style.color = "#4caf50";
+            } else {
+                document.getElementById('msg').innerText = "❌ 环境异常：未检测到 KSU";
+                document.getElementById('msg').style.color = "#f44336";
+            }
         }
-
-        window.onload = loadConfig;
     </script>
 </body>
 </html>
