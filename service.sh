@@ -1,23 +1,11 @@
 #!/system/bin/sh
-# Boot-time ZRAM control script
+MODDIR=${0%/*}
 
-MODULE_DIR="/data/adb/modules/zram_12g_uncookedboot"
-CONFIG_FILE="$MODULE_DIR/config.conf"
-
+# 等待系统开机完成
 until [ "$(getprop sys.boot_completed)" = "1" ]; do
     sleep 2
 done
 
-# Read BOOT_DELAY_SEC from config.conf
-BOOT_DELAY_SEC=$(grep "^BOOT_DELAY_SEC=" "$CONFIG_FILE" | cut -d'=' -f2 | tr -d '\r' | tr -d ' ')
-
-# Validate BOOT_DELAY_SEC
-if [ -z "$BOOT_DELAY_SEC" ] || ! echo "$BOOT_DELAY_SEC" | grep -qE '^[0-9]+$'; then
-    BOOT_DELAY_SEC=60 # Default to 60 seconds if invalid
-fi
-
-echo "ZRAM module: Waiting for $BOOT_DELAY_SEC seconds before initial setup..."
-sleep "$BOOT_DELAY_SEC"
-
-# Execute the core control script in the background
-sh "$MODULE_DIR/zram_ctrl.sh" &
+# 延迟 60 秒避开开机高峰期，然后执行核心引擎
+sleep 60
+sh "$MODDIR/zram_ctrl.sh" &
