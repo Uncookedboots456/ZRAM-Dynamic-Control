@@ -19,4 +19,4 @@ if [ "$(read_conf ENABLED)" != "1" ]; then
     exit 0
 fi
 
-sh "$MODDIR/zram_ctrl.sh"
+sh "$MODDIR/zram_ctrl.sh" boot

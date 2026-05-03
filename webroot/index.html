@@ -48,14 +48,17 @@
 
     <div id="status">正在读取当前配置...</div>
 
-    <label id="zramLabel" for="zramKb">ZRAM 容量 (KB):</label>
-    <input type="number" id="zramKb" value="1024" min="1" step="1">
+    <label id="zramLabel" for="zramMb">ZRAM 容量 (MB):</label>
+    <input type="number" id="zramMb" value="1024" min="1" step="1">
     <div class="hint" id="memHint">物理内存上限读取中...</div>
 
     <label id="algoLabel" for="algo">压缩协议:</label>
     <select id="algo">
         <option value="lz4">lz4</option>
         <option value="zstd">zstd</option>
+        <option value="lzo">lzo</option>
+        <option value="lzo-rle">lzo-rle</option>
+        <option value="lz4hc">lz4hc</option>
     </select>
 
     <label id="swapLabel" for="swap">Swappiness (0-200):</label>
@@ -71,7 +74,7 @@
         const modPath = '/data/adb/modules/zram_12g_uncookedboot';
         const configPath = `${modPath}/config.conf`;
         const actionPath = `${modPath}/action.sh`;
-        let memTotalKb = 1024;
+        let memTotalMb = 1;
         let currentLang = (typeof localStorage !== 'undefined' && localStorage.getItem('zram_ui_lang')) || 'zh';
         let currentState = { enabled: false, loadFailed: false };
         let lastMessage = { key: '', params: {}, ok: false, rawText: '' };
@@ -79,7 +82,7 @@
         const translations = {
             zh: {
                 title: 'ZRAM 引擎设置',
-                zramLabel: 'ZRAM 容量 (KB):',
+                zramLabel: 'ZRAM 容量 (MB):',
                 algoLabel: '压缩协议:',
                 swapLabel: 'Swappiness (0-200):',
                 wmLabel: 'Watermark Scale:',
@@ -90,9 +93,9 @@
                 statusEnabled: '当前状态：已启用。\n点击下方按钮会保存配置并立即执行。',
                 statusDisabled: '当前状态：未启用。\n点击下方按钮会保存配置、启用模块并立即执行。',
                 statusApplied: '当前状态：已启用，本次请求已写入并尝试立即执行。',
-                memHint: '物理内存上限 {memKb}KB (~{memGb}GB)。请直接输入目标 KB 值。',
-                invalidZram: 'ZRAM 容量必须是正整数 KB。',
-                invalidZramMax: 'ZRAM 容量不能超过物理内存上限 {memKb}KB。',
+                memHint: '物理内存上限 {memMb}MB (~{memGb}GB)。请直接输入目标 MB 值。',
+                invalidZram: 'ZRAM 容量必须是正整数 MB。',
+                invalidZramMax: 'ZRAM 容量不能超过物理内存上限 {memMb}MB。',
                 invalidSwap: 'Swappiness 必须是 0 到 200 之间的整数。',
                 invalidWm: 'Watermark Scale 必须是正整数。',
                 invalidAlgo: '压缩协议无效。',
@@ -102,7 +105,7 @@
             },
             en: {
                 title: 'ZRAM Control',
-                zramLabel: 'ZRAM Size (KB):',
+                zramLabel: 'ZRAM Size (MB):',
                 algoLabel: 'Compression Algorithm:',
                 swapLabel: 'Swappiness (0-200):',
                 wmLabel: 'Watermark Scale:',
@@ -113,9 +116,9 @@
                 statusEnabled: 'Current state: enabled.\nPress the button below to save and apply immediately.',
                 statusDisabled: 'Current state: disabled.\nPress the button below to save the configuration, enable the module, and apply immediately.',
                 statusApplied: 'Current state: enabled. This request has been saved and an immediate apply was attempted.',
-                memHint: 'Physical memory limit: {memKb}KB (~{memGb}GB). Enter the target value directly in KB.',
-                invalidZram: 'ZRAM size must be a positive integer in KB.',
-                invalidZramMax: 'ZRAM size must not exceed the physical memory limit of {memKb}KB.',
+                memHint: 'Physical memory limit: {memMb}MB (~{memGb}GB). Enter the target value directly in MB.',
+                invalidZram: 'ZRAM size must be a positive integer in MB.',
+                invalidZramMax: 'ZRAM size must not exceed the physical memory limit of {memMb}MB.',
                 invalidSwap: 'Swappiness must be an integer between 0 and 200.',
                 invalidWm: 'Watermark Scale must be a positive integer.',
                 invalidAlgo: 'Invalid compression algorithm.',
@@ -134,8 +137,8 @@
             return text;
         }
 
-        function formatApproxGb(kb) {
-            return (Number(kb) / 1024 / 1024).toFixed(2);
+        function formatApproxGb(mb) {
+            return (Number(mb) / 1024).toFixed(2);
         }
 
         function setMessage(text, ok = false) {
@@ -180,7 +183,7 @@
             document.getElementById('saveButton').innerText = t('saveButton');
             document.getElementById('langToggle').title = currentLang === 'zh' ? 'Switch to English' : '切换到中文';
             document.getElementById('langToggle').setAttribute('aria-label', document.getElementById('langToggle').title);
-            document.getElementById('memHint').innerText = t('memHint', { memKb: memTotalKb, memGb: formatApproxGb(memTotalKb) });
+            document.getElementById('memHint').innerText = t('memHint', { memMb: memTotalMb, memGb: formatApproxGb(memTotalMb) });
             refreshStatus();
             refreshMessage();
         }
@@ -226,26 +229,29 @@
             return config;
         }
 
-        function readConfigZramKb(config) {
+        function readConfigZramMb(config) {
+            if (/^\d+$/.test(config.ZRAM_SIZE_MB || '')) {
+                return config.ZRAM_SIZE_MB;
+            }
             if (/^\d+$/.test(config.ZRAM_SIZE_KB || '')) {
-                return config.ZRAM_SIZE_KB;
+                return String(Math.max(1, Math.floor(Number(config.ZRAM_SIZE_KB) / 1024)));
             }
             if (/^\d+$/.test(config.ZRAM_SIZE_GB || '')) {
-                return String(Number(config.ZRAM_SIZE_GB) * 1024 * 1024);
+                return String(Number(config.ZRAM_SIZE_GB) * 1024);
             }
             return '1024';
         }
 
         function validateValues(values) {
-            const zramKb = Number(values.zramKb);
+            const zramMb = Number(values.zramMb);
             const swap = Number(values.swap);
             const wm = Number(values.wm);
 
-            if (!Number.isInteger(zramKb) || zramKb <= 0) {
+            if (!Number.isInteger(zramMb) || zramMb <= 0) {
                 return t('invalidZram');
             }
-            if (zramKb > memTotalKb) {
-                return t('invalidZramMax', { memKb: memTotalKb });
+            if (zramMb > memTotalMb) {
+                return t('invalidZramMax', { memMb: memTotalMb });
             }
             if (!Number.isInteger(swap) || swap < 0 || swap > 200) {
                 return t('invalidSwap');
@@ -253,7 +259,7 @@
             if (!Number.isInteger(wm) || wm <= 0) {
                 return t('invalidWm');
             }
-            if (!['lz4', 'zstd'].includes(values.algo)) {
+            if (!['lz4', 'zstd', 'lzo', 'lzo-rle', 'lz4hc'].includes(values.algo)) {
                 return t('invalidAlgo');
             }
             return '';
@@ -268,20 +274,20 @@
             }
 
             try {
-                const memResult = await execShell("awk '/MemTotal/ {print $2}' /proc/meminfo");
-                const parsedMemKb = Number((memResult.text || '').trim());
-                if (Number.isFinite(parsedMemKb) && parsedMemKb > 0) {
-                    memTotalKb = parsedMemKb;
+                const memResult = await execShell("awk '/MemTotal/ {printf \"%d\", $2 / 1024}' /proc/meminfo");
+                const parsedMemMb = Number((memResult.text || '').trim());
+                if (Number.isFinite(parsedMemMb) && parsedMemMb > 0) {
+                    memTotalMb = parsedMemMb;
                 }
 
                 const confResult = await execShell(`cat ${configPath}`);
                 const config = parseConfig(confResult.text || '');
-                const zramKb = readConfigZramKb(config);
-                document.getElementById('zramKb').value = zramKb;
+                const zramMb = readConfigZramMb(config);
+                document.getElementById('zramMb').value = zramMb;
                 document.getElementById('algo').value = config.COMP_ALGORITHM || 'lz4';
                 document.getElementById('swap').value = config.SWAPPINESS || '80';
                 document.getElementById('wm').value = config.WATERMARK_SCALE_FACTOR || '50';
-                document.getElementById('zramKb').max = String(memTotalKb);
+                document.getElementById('zramMb').max = String(memTotalMb);
                 currentState.enabled = config.ENABLED === '1';
                 currentState.loadFailed = false;
                 applyLanguage(currentLang);
@@ -300,7 +306,7 @@
             }
 
             const values = {
-                zramKb: document.getElementById('zramKb').value.trim(),
+                zramMb: document.getElementById('zramMb').value.trim(),
                 algo: document.getElementById('algo').value,
                 swap: document.getElementById('swap').value.trim(),
                 wm: document.getElementById('wm').value.trim()
@@ -312,7 +318,7 @@
                 return;
             }
 
-            const confData = `ENABLED=1\nZRAM_SIZE_KB=${values.zramKb}\nCOMP_ALGORITHM=${values.algo}\nSWAPPINESS=${values.swap}\nWATERMARK_SCALE_FACTOR=${values.wm}\n`;
+            const confData = `ENABLED=1\nZRAM_SIZE_MB=${values.zramMb}\nCOMP_ALGORITHM=${values.algo}\nSWAPPINESS=${values.swap}\nWATERMARK_SCALE_FACTOR=${values.wm}\n`;
             const writeCommand = `cat > ${configPath} <<'EOF'\n${confData}EOF`;
 
             try {
