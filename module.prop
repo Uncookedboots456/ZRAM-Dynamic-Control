@@ -1,6 +1,6 @@
 id=zram_12g_uncookedboot
 name=ZRAM 动态控制核心
-version=v1.5
-versionCode=11
+version=v1.6.1
+versionCode=13
 author=UncookedBoot
-description=安装默认不接管；WebUI 保存后启用开机自动应用，新增安全校验、快捷容量选项与开机通知。
+description=KB 精确配置版。WebUI 新增中英切换，可保存并立即执行，所有实际生效调用统一系统通知。
