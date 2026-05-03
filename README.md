@@ -5,7 +5,7 @@
 
 🌍 *[English Version Below](#english-version)*
 
-这是一个专为现代 Android 环境设计的轻量级 ZRAM 动态调度核心。采用彻底解耦的纯脚本架构，支持在 Root 管理器中一键无感热重载，精准控制底层内存交换策略。
+这是一个专为现代 Android 环境设计的轻量级 ZRAM 动态调度核心。采用彻底解耦的纯脚本架构，支持在 Root 管理器中一键热重载，并通过 WebUI 完成安全配置与启用控制。
 
 **创作者:** UncookedBoot (大海兲)  
 **协议:** GPLv3  
@@ -17,28 +17,42 @@
 
 ### 💡 核心原理 (How it Works)
 
-本模块摒弃了传统的粗暴修改，采用现代化的模块开发标准：
-* **去系统挂载化 (Script-Only 架构):** 彻底抛弃传统的 Magic Mount (`/system` 目录投射) 机制。所有脚本均在 `/data/adb/modules/` 物理绝对路径下直接运行，100% 免疫深度定制系统的 SELinux 拦截与命名空间隔离。
-* **极客级热重载 (Action Trigger):** 深度适配 Root 管理器的原生 Action 按钮。修改配置文件后，终端脚本会直接覆写 Linux 内核的 `/sys/block/zram0/disksize` 节点，**无需重启设备**。
-* **智能防爆机制 (Safe-Swap):** 在执行底层 `swapoff` 卸载动作前，脚本会自动拉起 `sync` 和 `drop_caches` 释放物理内存缓存，完美规避因物理内存爆满导致的卸载失败与系统死锁。
-* **闭环状态校验:** 每次热重载都会对比底层硬件节点与 `/proc/meminfo` 实际挂载状态，并在控制台实时回显。
+本模块采用现代化的脚本式模块架构：
+* **Script-Only 架构:** 不依赖传统 Magic Mount，对深度定制系统更友好。
+* **安装即读取，不默认接管:** 安装阶段会自动读取当前设备的 ZRAM 与 VM 参数，写入配置文件，但默认保持未启用状态。
+* **WebUI 启用控制:** 用户在 WebUI 中保存配置后，模块才会开始在开机后自动应用。
+* **热重载执行链:** 支持通过 Root 管理器的 Action 按钮立即应用当前配置，无需重启设备。
+* **安全保护:** ZRAM 容量不得超过物理内存上限，前端与脚本端均会执行参数校验。
+* **开机通知:** 当模块已启用时，开机自动应用成功或失败会发送系统通知。
 
 ### 🚀 使用指南
 
-**1. 初始部署**
-在 Releases 页面下载 `.zip` 刷机包，通过 KernelSU/Magisk/APatch 刷入并重启设备。开机脚本内置 60 秒延时，以确保能稳定覆盖其他性能模块的默认设定。
+**1. 初始部署**  
+在 Releases 页面下载 `.zip` 刷机包，通过 KernelSU/Magisk/APatch 刷入。安装终端会显示当前设备的物理内存、ZRAM 容量、压缩算法以及 VM 参数，并生成初始化配置。
 
-**2. 声明式配置**
-使用文本编辑器（如 MT 管理器）打开以下路径的配置文件：
-`/data/adb/modules/zram_12g_uncookedboot/config.conf`
-将 `ZRAM_SIZE_GB=` 后的数值修改为你期望的容量（仅填纯数字，如 8、12、16）。
+**2. 默认状态**  
+模块安装后默认 **未启用**，不会主动修改当前系统的 ZRAM。此时配置文件只作为当前设备状态的快照。
 
-**3. 一键热生效**
-保存配置后，进入 Root 管理器的模块列表，点击本模块描述下方的 **操作 (Action)** 按钮。等待终端运行完毕，新容量即刻生效。
+**3. WebUI 配置与启用**  
+进入模块 WebUI 后，可直接输入 ZRAM 容量（单位 GB），也可以使用 **1/2、1/3、1/4 物理内存** 快捷选项。保存后会写入配置并启用模块，后续开机自动应用生效。
+
+**4. 立即应用**  
+保存配置后，可点击 Root 管理器中的 **Action** 按钮立即执行当前配置；若不手动执行，则会在下次开机延迟应用。
+
+### ✅ v1.5 更新日志
+
+* 新增安装阶段设备当前配置读取，并在终端打印物理内存与现有 ZRAM/VM 参数。
+* 新增 `ENABLED` 启用开关，安装后默认不接管，只有 WebUI 保存后才启用。
+* 新增开机自动应用结果通知，成功与失败均可在系统通知中看到反馈。
+* 新增核心安全校验：ZRAM 容量不能超过物理内存，脚本与 WebUI 双重拦截非法参数。
+* 新增 WebUI 快捷容量按钮：`1/2`、`1/3`、`1/4` 物理内存，同时保留手动输入 GB。
+* 优化手动 Action 行为：未启用时只提示，不执行底层修改。
+* 优化核心脚本容错：当前未启用 zram swap 时会跳过 `swapoff`，避免无意义失败。
 
 ### ⚠️ 用户须知
-* **默认配置:** 本模块默认设定为 **12GB**，这对于搭载大内存（如骁龙 8 Gen 3）的设备是一个兼顾前台流畅度与后台驻留的“甜点”容量。
-* **冲突说明:** 若设备中存在高频轮询并强制锁定 ZRAM 大小的其他守护进程，本模块的热重载可能会被其后续动作覆盖。
+* **容量限制:** 出于安全考虑，ZRAM 目标值不得超过设备物理内存整数 GB 上限。
+* **启用方式:** 安装后不会自动接管，需先在 WebUI 保存一次配置。
+* **冲突说明:** 若设备中存在持续轮询并强制锁定 ZRAM 的其他守护进程，本模块的应用结果可能被覆盖。
 * **免责声明:** 修改 Linux 内核底层节点具有一定风险。作者不对因极端内存调度导致的设备卡顿、数据丢失或重启负责。
 
 ---
@@ -47,26 +61,40 @@
 
 ### 💡 Principles (How it Works)
 
-This module Abandons brute-force modifications in favor of modern module development standards:
-* **Script-Only Architecture:** Completely discards the traditional Magic Mount (`/system` projection) mechanism. All scripts run directly under the physical absolute path of `/data/adb/modules/`, ensuring 100% immunity to SELinux interception and mount namespace isolation on heavily customized ROMs.
-* **Seamless Hot-Reload (Action Trigger):** Fully adapted to the native Action button in Root Managers. After modifying the config file, the script directly overwrites the `/sys/block/zram0/disksize` kernel node without requiring a device reboot.
-* **Safe-Swap Mechanism:** Before executing the underlying `swapoff` command, the script automatically triggers `sync` and `drop_caches` to free up physical memory, perfectly avoiding unmount failures and system deadlocks caused by full RAM.
-* **Closed-Loop Verification:** Every hot-reload compares the underlying hardware node with the actual mount status in `/proc/meminfo` and echoes it in real-time in the console.
+This module uses a modern script-only architecture:
+* **Script-Only Design:** No traditional Magic Mount dependency, making it friendlier to customized ROM environments.
+* **Read Current State on Install:** During installation, the module reads the current ZRAM and VM settings and writes them into the config file, but stays disabled by default.
+* **WebUI-Based Enablement:** The module only starts taking control after the user saves settings in the WebUI.
+* **Hot Reload via Action:** Users can apply the current configuration immediately with the Root Manager Action button.
+* **Safety Validation:** Target ZRAM size must not exceed physical memory; both the WebUI and shell script validate parameters.
+* **Boot Notification:** When enabled, automatic boot-time apply will post a success or failure notification.
 
 ### 🚀 Usage Guide
 
-**1. Initial Deployment**
-Download the `.zip` package from the Releases page, flash it via KernelSU/Magisk/APatch, and reboot. The boot script has a built-in 60-second delay to stably override default settings from other performance modules.
+**1. Installation**  
+Download the release `.zip`, flash it via KernelSU/Magisk/APatch, and review the installer output for physical memory, current ZRAM size, compression algorithm, and VM parameters.
 
-**2. Declarative Configuration**
-Open the config file using a text editor at the following path:
-`/data/adb/modules/zram_12g_uncookedboot/config.conf`
-Change the value after `ZRAM_SIZE_GB=` to your desired capacity (numbers only, e.g., 8, 12, 16).
+**2. Default State**  
+After installation, the module is **disabled by default** and does not modify the current ZRAM setup until the user explicitly enables it.
 
-**3. One-Click Application**
-After saving the configuration, go to your Root Manager's module list and click the **Action** button below this module's description. The new capacity will take effect immediately after the terminal finishes running.
+**3. Configure and Enable via WebUI**  
+Open the WebUI and either enter a ZRAM size in GB directly or use the **1/2, 1/3, 1/4 of physical memory** shortcuts. Saving the form writes the config and enables automatic boot-time apply.
 
-### ⚠️ User Notice
-* **Default Setting:** The module defaults to **12GB**, which is a "sweet spot" capacity balancing foreground fluidity and background app retention for devices with large RAM (e.g., Snapdragon 8 Gen 3).
-* **Conflict Warning:** If there are other daemons on your device that poll at high frequencies and force-lock the ZRAM size, the hot-reload from this module might be overwritten by their subsequent actions.
-* **Disclaimer:** Modifying underlying Linux kernel nodes involves inherent risks. The author is not responsible for device lag, data loss, or random reboots caused by extreme memory scheduling.git push -u origin main
+**4. Apply Immediately**  
+After saving, use the Root Manager **Action** button to apply the config immediately, or just reboot and let the module apply it automatically after boot.
+
+### ✅ v1.5 Changelog
+
+* Added install-time detection of current device memory, ZRAM size, compression algorithm, and VM parameters.
+* Added an `ENABLED` flag so the module stays disabled by default until the user saves settings in the WebUI.
+* Added boot-time notification feedback for successful or failed automatic apply.
+* Added safety checks so target ZRAM size cannot exceed physical memory, enforced in both the WebUI and shell script.
+* Added WebUI quick size buttons for `1/2`, `1/3`, and `1/4` of physical memory while keeping direct GB input.
+* Improved Action behavior so disabled configs only show guidance instead of performing low-level changes.
+* Improved script tolerance by skipping `swapoff` when zram swap is not currently active.
+
+### ⚠️ Notes
+* **Capacity Limit:** For safety, the target ZRAM size must not exceed the device's physical memory in whole GB.
+* **Enablement:** The module will not take control until the user saves a config in the WebUI.
+* **Conflict Warning:** Other performance daemons may override the applied ZRAM size later.
+* **Disclaimer:** Low-level kernel changes always carry risk; the author is not responsible for instability, lag, or data loss.
