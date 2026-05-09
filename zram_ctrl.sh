@@ -9,8 +9,8 @@ read_conf() {
     echo "$value"
 }
 
-read_mem_total_kb() {
-    local kb
+read_mem_total_mb() {
+    local kb mb
     kb=$(awk '/MemTotal/ {print $2}' /proc/meminfo 2>/dev/null)
     case "$kb" in
         ''|*[!0-9]*) kb=1024 ;;
@@ -18,11 +18,15 @@ read_mem_total_kb() {
     if [ "$kb" -le 0 ] 2>/dev/null; then
         kb=1024
     fi
-    echo "$kb"
+    mb=$(awk -v kb="$kb" 'BEGIN {printf "%d", kb / 1024}')
+    case "$mb" in
+        ''|*[!0-9]*) mb=1 ;;
+    esac
+    echo "$mb"
 }
 
-format_gb_from_kb() {
-    awk -v kb="$1" 'BEGIN {printf "%.2f", kb / 1024 / 1024}'
+format_gb_from_mb() {
+    awk -v mb="$1" 'BEGIN {printf "%.2f", mb / 1024}'
 }
 
 is_positive_integer() {
@@ -57,16 +61,21 @@ fail() {
     exit "$code"
 }
 
-read_target_zram_kb() {
-    local kb gb
+read_target_zram_mb() {
+    local mb kb gb
+    mb=$(read_conf ZRAM_SIZE_MB)
+    if is_positive_integer "$mb"; then
+        echo "$mb"
+        return
+    fi
     kb=$(read_conf ZRAM_SIZE_KB)
     if is_positive_integer "$kb"; then
-        echo "$kb"
+        awk -v kb="$kb" 'BEGIN {printf "%d", kb / 1024}'
         return
     fi
     gb=$(read_conf ZRAM_SIZE_GB)
     if is_positive_integer "$gb"; then
-        awk -v gb="$gb" 'BEGIN {printf "%d", gb * 1024 * 1024}'
+        awk -v gb="$gb" 'BEGIN {printf "%d", gb * 1024}'
         return
     fi
     echo "0"
@@ -77,35 +86,35 @@ if [ ! -f "$CONF" ]; then
 fi
 
 ENABLED=$(read_conf ENABLED)
-ZRAM_SIZE_KB=$(read_target_zram_kb)
+ZRAM_SIZE_MB=$(read_target_zram_mb)
 COMP_ALGORITHM=$(read_conf COMP_ALGORITHM)
 SWAPPINESS=$(read_conf SWAPPINESS)
 WATERMARK_SCALE=$(read_conf WATERMARK_SCALE_FACTOR)
-MEM_TOTAL_KB=$(read_mem_total_kb)
-MEM_TOTAL_GB=$(format_gb_from_kb "$MEM_TOTAL_KB")
-TARGET_ZRAM_GB=$(format_gb_from_kb "$ZRAM_SIZE_KB")
+MEM_TOTAL_MB=$(read_mem_total_mb)
+MEM_TOTAL_GB=$(format_gb_from_mb "$MEM_TOTAL_MB")
+TARGET_ZRAM_GB=$(format_gb_from_mb "$ZRAM_SIZE_MB")
 
 ENABLED=${ENABLED:-0}
-ZRAM_SIZE_KB=${ZRAM_SIZE_KB:-0}
+ZRAM_SIZE_MB=${ZRAM_SIZE_MB:-0}
 COMP_ALGORITHM=${COMP_ALGORITHM:-lz4}
 SWAPPINESS=${SWAPPINESS:-80}
 WATERMARK_SCALE=${WATERMARK_SCALE:-50}
 
 if [ "$ENABLED" != "1" ]; then
-    echo "[!] 当前配置未启用，请先在 WebUI 保存并立即执行。"
+    echo "[!] 当前配置未启用，请先在 WebUI 保存配置并执行 action。"
     exit 10
 fi
 
-if ! is_positive_integer "$ZRAM_SIZE_KB"; then
-    fail 12 "[x] ZRAM_SIZE_KB 必须是正整数。"
+if ! is_positive_integer "$ZRAM_SIZE_MB"; then
+    fail 12 "[x] ZRAM_SIZE_MB 必须是正整数。"
 fi
 
-if [ "$ZRAM_SIZE_KB" -gt "$MEM_TOTAL_KB" ] 2>/dev/null; then
-    fail 13 "[x] 目标 ZRAM ${ZRAM_SIZE_KB}KB 超过物理内存上限 ${MEM_TOTAL_KB}KB。"
+if [ "$ZRAM_SIZE_MB" -gt "$MEM_TOTAL_MB" ] 2>/dev/null; then
+    fail 13 "[x] 目标 ZRAM ${ZRAM_SIZE_MB}MB 超过物理内存上限 ${MEM_TOTAL_MB}MB。"
 fi
 
 case "$COMP_ALGORITHM" in
-    lz4|zstd) ;;
+    lz4|zstd|lzo|lzo-rle|lz4k|zstdn|zstdn_o) ;;
     *) fail 14 "[x] 不支持的压缩算法: $COMP_ALGORITHM" ;;
 esac
 
@@ -118,8 +127,8 @@ if ! is_positive_integer "$WATERMARK_SCALE"; then
 fi
 
 echo "[*] 开始执行 ZRAM 核心引擎..."
-echo "[*] 物理内存上限: ${MEM_TOTAL_KB}KB (~${MEM_TOTAL_GB}GB)"
-echo "[*] 目标配置: ${ZRAM_SIZE_KB}KB (~${TARGET_ZRAM_GB}GB) | ${COMP_ALGORITHM} | Swap:${SWAPPINESS} | WM:${WATERMARK_SCALE}"
+echo "[*] 物理内存上限: ${MEM_TOTAL_MB}MB (~${MEM_TOTAL_GB}GB)"
+echo "[*] 目标配置: ${ZRAM_SIZE_MB}MB (~${TARGET_ZRAM_GB}GB) | ${COMP_ALGORITHM} | Swap:${SWAPPINESS} | WM:${WATERMARK_SCALE}"
 
 if [ ! -w /sys/block/zram0/disksize ] || [ ! -w /sys/block/zram0/comp_algorithm ]; then
     fail 17 "[x] ZRAM sysfs 节点不可写。"
@@ -146,7 +155,7 @@ echo "[*] 正在重新分配空间与协议..."
 if ! echo "$COMP_ALGORITHM" > /sys/block/zram0/comp_algorithm; then
     fail 21 "[x] 压缩算法写入失败。"
 fi
-ZRAM_BYTES=$(awk -v kb="$ZRAM_SIZE_KB" 'BEGIN {printf "%d", kb * 1024}')
+ZRAM_BYTES=$(awk -v mb="$ZRAM_SIZE_MB" 'BEGIN {printf "%d", mb * 1024 * 1024}')
 if ! echo "$ZRAM_BYTES" > /sys/block/zram0/disksize; then
     fail 22 "[x] disksize 写入失败。"
 fi
@@ -168,5 +177,5 @@ if ! echo "$WATERMARK_SCALE" > /proc/sys/vm/watermark_scale_factor; then
 fi
 
 echo "[√] 所有底层操作已完成。"
-notify_result "ZRAM 已生效" "${ZRAM_SIZE_KB}KB (~${TARGET_ZRAM_GB}GB) / ${COMP_ALGORITHM} 已成功生效"
+notify_result "ZRAM 已生效" "${ZRAM_SIZE_MB}MB (~${TARGET_ZRAM_GB}GB) / ${COMP_ALGORITHM} 已成功生效"
 exit 0

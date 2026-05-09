@@ -21,8 +21,8 @@
             outline: none;
         }
         input:focus, select:focus { border-color: #007bff; }
-        button { margin-top: 18px; background: #007bff; font-weight: bold; border: none; cursor: pointer; }
-        button:active { background: #0056b3; }
+        button { margin-top: 18px; font-weight: bold; border: none; cursor: pointer; }
+        button:active { transform: translateY(1px); }
         .lang-btn {
             width: 44px;
             min-width: 44px;
@@ -37,7 +37,73 @@
         }
         .hint { margin-top: 8px; color: #9aa0a6; font-size: 13px; line-height: 1.5; }
         #status { margin-top: 12px; color: #4caf50; font-size: 14px; line-height: 1.5; white-space: pre-wrap; }
-        #msg { margin-top: 20px; text-align: left; font-size: 14px; min-height: 20px; color: #4caf50; line-height: 1.5; white-space: pre-wrap; }
+        .action-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-top: 18px;
+        }
+        .action-row button {
+            margin-top: 0;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+        .save-btn { background: #34506d; }
+        .save-btn:active { background: #2b425b; }
+        .run-btn { background: #007bff; }
+        .run-btn:active { background: #0056b3; }
+        .terminal-wrap { margin-top: 22px; }
+        .terminal-title { display: block; margin-bottom: 8px; color: #aaa; }
+        .terminal {
+            min-height: 240px;
+            max-height: 420px;
+            overflow: auto;
+            box-sizing: border-box;
+            padding: 14px;
+            border-radius: 8px;
+            border: 1px solid #2f3338;
+            background: #0b0d10;
+            color: #c9f7c2;
+            font-family: Consolas, "Courier New", monospace;
+            font-size: 13px;
+            line-height: 1.55;
+        }
+        .terminal.empty { color: #6f7b87; white-space: pre-wrap; }
+        .term-line {
+            white-space: pre-wrap;
+            word-break: break-word;
+            padding: 8px 10px;
+            border-radius: 6px;
+            margin-bottom: 8px;
+            border-left: 3px solid transparent;
+            background: #11151a;
+        }
+        .term-line:last-child { margin-bottom: 0; }
+        .term-line.info {
+            color: #d2e9ff;
+            background: rgba(56, 139, 253, 0.10);
+            border-left-color: #388bfd;
+        }
+        .term-line.success {
+            color: #b6f0c2;
+            background: rgba(46, 160, 67, 0.12);
+            border-left-color: #2ea043;
+        }
+        .term-line.warn {
+            color: #f7d28b;
+            background: rgba(210, 153, 34, 0.12);
+            border-left-color: #d29922;
+        }
+        .term-line.error {
+            color: #ffb4ad;
+            background: rgba(248, 81, 73, 0.12);
+            border-left-color: #f85149;
+        }
+        @media (max-width: 520px) {
+            .action-row { grid-template-columns: 1fr; }
+        }
     </style>
 </head>
 <body>
@@ -48,14 +114,19 @@
 
     <div id="status">正在读取当前配置...</div>
 
-    <label id="zramLabel" for="zramKb">ZRAM 容量 (KB):</label>
-    <input type="number" id="zramKb" value="1024" min="1" step="1">
+    <label id="zramLabel" for="zramMb">ZRAM 容量 (MB):</label>
+    <input type="number" id="zramMb" value="1024" min="1" step="1">
     <div class="hint" id="memHint">物理内存上限读取中...</div>
 
     <label id="algoLabel" for="algo">压缩协议:</label>
     <select id="algo">
         <option value="lz4">lz4</option>
         <option value="zstd">zstd</option>
+        <option value="lzo">lzo</option>
+        <option value="lzo-rle">lzo-rle</option>
+        <option value="lz4k">lz4k</option>
+        <option value="zstdn">zstdn</option>
+        <option value="zstdn_o">zstdn_o</option>
     </select>
 
     <label id="swapLabel" for="swap">Swappiness (0-200):</label>
@@ -64,64 +135,81 @@
     <label id="wmLabel" for="wm">Watermark Scale:</label>
     <input type="number" id="wm" value="50" min="1" step="1">
 
-    <button id="saveButton" onclick="saveAndApply()">保存并立即执行</button>
-    <div id="msg"></div>
+    <div class="action-row">
+        <button id="saveButton" type="button" class="save-btn">📦 保存</button>
+        <button id="runButton" type="button" class="run-btn">🚀 执行 action</button>
+    </div>
+
+    <div class="terminal-wrap">
+        <label id="terminalLabel" class="terminal-title" for="terminalOutput">终端输出:</label>
+        <div id="terminalOutput" class="terminal empty"></div>
+    </div>
 
     <script>
         const modPath = '/data/adb/modules/zram_12g_uncookedboot';
         const configPath = `${modPath}/config.conf`;
-        const actionPath = `${modPath}/action.sh`;
-        let memTotalKb = 1024;
+        const enginePath = `${modPath}/zram_ctrl.sh`;
+        let memTotalMb = 1024;
         let currentLang = (typeof localStorage !== 'undefined' && localStorage.getItem('zram_ui_lang')) || 'zh';
-        let currentState = { enabled: false, loadFailed: false };
-        let lastMessage = { key: '', params: {}, ok: false, rawText: '' };
+        let currentState = { enabled: false, loadFailed: false, executing: false };
+        let terminalEntries = [];
 
         const translations = {
             zh: {
                 title: 'ZRAM 引擎设置',
-                zramLabel: 'ZRAM 容量 (KB):',
+                zramLabel: 'ZRAM 容量 (MB):',
                 algoLabel: '压缩协议:',
                 swapLabel: 'Swappiness (0-200):',
                 wmLabel: 'Watermark Scale:',
-                saveButton: '保存并立即执行',
+                saveButton: '📦 保存',
+                runButton: '🚀 执行 action',
+                terminalLabel: '终端输出:',
                 loading: '正在读取当前配置...',
                 noKsu: '环境异常：未检测到 KSU',
                 readFailed: '读取配置失败，请检查模块路径或 KSU 权限。',
-                statusEnabled: '当前状态：已启用。\n点击下方按钮会保存配置并立即执行。',
-                statusDisabled: '当前状态：未启用。\n点击下方按钮会保存配置、启用模块并立即执行。',
-                statusApplied: '当前状态：已启用，本次请求已写入并尝试立即执行。',
-                memHint: '物理内存上限 {memKb}KB (~{memGb}GB)。请直接输入目标 KB 值。',
-                invalidZram: 'ZRAM 容量必须是正整数 KB。',
-                invalidZramMax: 'ZRAM 容量不能超过物理内存上限 {memKb}KB。',
-                invalidSwap: 'Swappiness 必须是 0 到 200 之间的整数。',
-                invalidWm: 'Watermark Scale 必须是正整数。',
-                invalidAlgo: '压缩协议无效。',
-                saveSuccess: '✅ 配置已保存并立即执行成功。\n\n{details}',
-                saveExecFailed: '❌ 配置已保存，但本次立即执行失败。\n\n{details}',
-                saveFailed: '❌ 保存或执行失败：{details}'
+                statusEnabled: '当前状态：已启用。\n左侧保存配置，右侧执行 action 立即生效。',
+                statusDisabled: '当前状态：未启用。\n先保存配置，再通过执行 action 启用并执行。',
+                statusSaved: '当前状态：配置已保存。\n可点击右侧执行 action 立即生效。',
+                statusApplied: '当前状态：已启用，本次执行已完成。',
+                statusApplying: '当前状态：正在执行 action，请查看下方终端输出。',
+                memHint: '物理内存上限 {memMb}MB (~{memGb}GB)。请直接输入目标 MB 值。',
+                invalidZram: '[x] ZRAM 容量必须是正整数 MB。',
+                invalidZramMax: '[x] ZRAM 容量不能超过物理内存上限 {memMb}MB。',
+                invalidSwap: '[x] Swappiness 必须是 0 到 200 之间的整数。',
+                invalidWm: '[x] Watermark Scale 必须是正整数。',
+                invalidAlgo: '[x] 压缩协议无效。',
+                saveStart: '[*] 正在写入配置...',
+                saveDone: '[√] 配置写入完成。',
+                saveFail: '[x] 配置写入失败: {details}',
+                terminalEmpty: '终端输出会显示在这里。'
             },
             en: {
                 title: 'ZRAM Control',
-                zramLabel: 'ZRAM Size (KB):',
+                zramLabel: 'ZRAM Size (MB):',
                 algoLabel: 'Compression Algorithm:',
                 swapLabel: 'Swappiness (0-200):',
                 wmLabel: 'Watermark Scale:',
-                saveButton: 'Save and Apply Now',
+                saveButton: '📦 Save',
+                runButton: '🚀 Run action',
+                terminalLabel: 'Terminal Output:',
                 loading: 'Loading current configuration...',
                 noKsu: 'Environment error: KSU not detected.',
                 readFailed: 'Failed to read the configuration. Check the module path or KSU permission.',
-                statusEnabled: 'Current state: enabled.\nPress the button below to save and apply immediately.',
-                statusDisabled: 'Current state: disabled.\nPress the button below to save the configuration, enable the module, and apply immediately.',
-                statusApplied: 'Current state: enabled. This request has been saved and an immediate apply was attempted.',
-                memHint: 'Physical memory limit: {memKb}KB (~{memGb}GB). Enter the target value directly in KB.',
-                invalidZram: 'ZRAM size must be a positive integer in KB.',
-                invalidZramMax: 'ZRAM size must not exceed the physical memory limit of {memKb}KB.',
-                invalidSwap: 'Swappiness must be an integer between 0 and 200.',
-                invalidWm: 'Watermark Scale must be a positive integer.',
-                invalidAlgo: 'Invalid compression algorithm.',
-                saveSuccess: '✅ Configuration saved and applied successfully.\n\n{details}',
-                saveExecFailed: '❌ Configuration was saved, but the immediate apply failed.\n\n{details}',
-                saveFailed: '❌ Save or apply failed: {details}'
+                statusEnabled: 'Current state: enabled.\nUse the left button to save, or run action from the right button.',
+                statusDisabled: 'Current state: disabled.\nSave the config first, then run action to enable and apply it.',
+                statusSaved: 'Current state: configuration saved.\nUse the Run action button to apply it now.',
+                statusApplied: 'Current state: enabled. The latest action has completed.',
+                statusApplying: 'Current state: running action. Check the terminal output below.',
+                memHint: 'Physical memory limit: {memMb}MB (~{memGb}GB). Enter the target value directly in MB.',
+                invalidZram: '[x] ZRAM size must be a positive integer in MB.',
+                invalidZramMax: '[x] ZRAM size must not exceed the physical memory limit of {memMb}MB.',
+                invalidSwap: '[x] Swappiness must be an integer between 0 and 200.',
+                invalidWm: '[x] Watermark Scale must be a positive integer.',
+                invalidAlgo: '[x] Invalid compression algorithm.',
+                saveStart: '[*] Writing configuration...',
+                saveDone: '[√] Configuration saved.',
+                saveFail: '[x] Failed to save configuration: {details}',
+                terminalEmpty: 'Terminal output will appear here.'
             }
         };
 
@@ -134,35 +222,122 @@
             return text;
         }
 
-        function formatApproxGb(kb) {
-            return (Number(kb) / 1024 / 1024).toFixed(2);
+        function formatApproxGb(mb) {
+            return (Number(mb) / 1024).toFixed(2);
         }
 
-        function setMessage(text, ok = false) {
-            const msg = document.getElementById('msg');
-            msg.innerText = text;
-            msg.style.color = ok ? '#4caf50' : '#f44336';
+        function escapeHtml(text) {
+            return String(text)
+                .replaceAll('&', '&amp;')
+                .replaceAll('<', '&lt;')
+                .replaceAll('>', '&gt;')
+                .replaceAll('"', '&quot;')
+                .replaceAll("'", '&#39;');
         }
 
-        function setTranslatedMessage(key, params = {}, ok = false, rawText = '') {
-            lastMessage = { key, params, ok, rawText };
-            setMessage(rawText || t(key, params), ok);
+        function translateTerminalLine(line) {
+            if (currentLang !== 'en') return line;
+
+            const mappings = [
+                [/^\[\*\] 正在写入配置\.\.\.$/, '[*] Writing configuration...'],
+                [/^\[√\] 配置写入完成。$/, '[√] Configuration saved.'],
+                [/^\[x\] 配置写入失败: (.+)$/, '[x] Failed to save configuration: $1'],
+                [/^\[\!\] 当前配置未启用，请先在 WebUI 保存并立即执行。$/, '[!] Current config is disabled. Save and run from the WebUI first.'],
+                [/^\[x\] 配置文件不存在: (.+)$/, '[x] Config file not found: $1'],
+                [/^\[x\] ZRAM_SIZE_MB 必须是正整数。$/, '[x] ZRAM_SIZE_MB must be a positive integer.'],
+                [/^\[x\] 目标 ZRAM (.+)MB 超过物理内存上限 (.+)MB。$/, '[x] Target ZRAM $1MB exceeds physical memory limit $2MB.'],
+                [/^\[x\] 不支持的压缩算法: (.+)$/, '[x] Unsupported compression algorithm: $1'],
+                [/^\[x\] SWAPPINESS 必须是 0 到 200 之间的整数。$/, '[x] SWAPPINESS must be an integer between 0 and 200.'],
+                [/^\[x\] WATERMARK_SCALE_FACTOR 必须是正整数。$/, '[x] WATERMARK_SCALE_FACTOR must be a positive integer.'],
+                [/^\[\*\] 开始执行 ZRAM 核心引擎\.\.\.$/, '[*] Starting the ZRAM core engine...'],
+                [/^\[\*\] 物理内存上限: (.+)MB \(~(.+)GB\)$/, '[*] Physical memory limit: $1MB (~$2GB)'],
+                [/^\[\*\] 目标配置: (.+)$/, '[*] Target config: $1'],
+                [/^\[x\] ZRAM sysfs 节点不可写。$/, '[x] ZRAM sysfs node is not writable.'],
+                [/^\[x\] drop_caches 写入失败。$/, '[x] Failed to write drop_caches.'],
+                [/^\[\*\] 正在卸载旧节点\.\.\.$/, '[*] Releasing the old node...'],
+                [/^\[\*\] 检测到当前未启用 zram swap，跳过 swapoff。$/, '[*] zram swap is not active. Skipping swapoff.'],
+                [/^\[x\] swapoff 执行失败。$/, '[x] swapoff failed.'],
+                [/^\[x\] zram reset 失败。$/, '[x] zram reset failed.'],
+                [/^\[\*\] 正在重新分配空间与协议\.\.\.$/, '[*] Reallocating size and algorithm...'],
+                [/^\[x\] 压缩算法写入失败。$/, '[x] Failed to write compression algorithm.'],
+                [/^\[x\] disksize 写入失败。$/, '[x] Failed to write disksize.'],
+                [/^\[\*\] 挂载新 ZRAM\.\.\.$/, '[*] Attaching the new ZRAM...'],
+                [/^\[x\] mkswap 执行失败。$/, '[x] mkswap failed.'],
+                [/^\[x\] swapon 执行失败。$/, '[x] swapon failed.'],
+                [/^\[\*\] 注入内核调优参数\.\.\.$/, '[*] Applying kernel tuning parameters...'],
+                [/^\[x\] swappiness 写入失败。$/, '[x] Failed to write swappiness.'],
+                [/^\[x\] watermark_scale_factor 写入失败。$/, '[x] Failed to write watermark_scale_factor.'],
+                [/^\[√\] 所有底层操作已完成。$/, '[√] All low-level operations completed.']
+            ];
+
+            for (const [pattern, replacement] of mappings) {
+                if (pattern.test(line)) {
+                    return line.replace(pattern, replacement);
+                }
+            }
+            return line;
         }
 
-        function refreshMessage() {
-            if (!lastMessage.key && !lastMessage.rawText) return;
-            setMessage(lastMessage.rawText || t(lastMessage.key, lastMessage.params), lastMessage.ok);
+        function detectLevel(text) {
+            const lower = text.toLowerCase();
+            if (text.includes('[x]') || lower.includes('failed')) return 'error';
+            if (text.includes('[!]')) return 'warn';
+            if (text.includes('[√]')) return 'success';
+            return 'info';
+        }
+
+        function renderTerminal() {
+            const terminal = document.getElementById('terminalOutput');
+            if (!terminalEntries.length) {
+                terminal.innerHTML = escapeHtml(t('terminalEmpty'));
+                terminal.classList.add('empty');
+                return;
+            }
+
+            const html = terminalEntries.map((entry) => {
+                const translated = translateTerminalLine(entry.text);
+                return `<div class="term-line ${entry.level}">${escapeHtml(translated)}</div>`;
+            }).join('');
+
+            terminal.innerHTML = html;
+            terminal.classList.remove('empty');
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+
+        function clearTerminal() {
+            terminalEntries = [];
+            renderTerminal();
+        }
+
+        function appendTerminal(text, level = '') {
+            const normalized = String(text || '').trim();
+            if (!normalized) return;
+            normalized.split(/\r?\n/).forEach((line) => {
+                terminalEntries.push({ text: line, level: level || detectLevel(line) });
+            });
+            renderTerminal();
+        }
+
+        function setStatus(text, color) {
+            const status = document.getElementById('status');
+            status.innerText = text;
+            status.style.color = color;
         }
 
         function refreshStatus() {
-            const status = document.getElementById('status');
             if (currentState.loadFailed) {
-                status.innerText = t('readFailed');
-                status.style.color = '#f44336';
+                setStatus(t('readFailed'), '#f44336');
                 return;
             }
-            status.innerText = currentState.enabled ? t('statusEnabled') : t('statusDisabled');
-            status.style.color = currentState.enabled ? '#4caf50' : '#ffb74d';
+            if (currentState.executing) {
+                setStatus(t('statusApplying'), '#4caf50');
+                return;
+            }
+            if (currentState.enabled) {
+                setStatus(t('statusEnabled'), '#4caf50');
+                return;
+            }
+            setStatus(t('statusDisabled'), '#ffb74d');
         }
 
         function applyLanguage(lang) {
@@ -178,11 +353,13 @@
             document.getElementById('swapLabel').innerText = t('swapLabel');
             document.getElementById('wmLabel').innerText = t('wmLabel');
             document.getElementById('saveButton').innerText = t('saveButton');
+            document.getElementById('runButton').innerText = t('runButton');
+            document.getElementById('terminalLabel').innerText = t('terminalLabel');
             document.getElementById('langToggle').title = currentLang === 'zh' ? 'Switch to English' : '切换到中文';
             document.getElementById('langToggle').setAttribute('aria-label', document.getElementById('langToggle').title);
-            document.getElementById('memHint').innerText = t('memHint', { memKb: memTotalKb, memGb: formatApproxGb(memTotalKb) });
+            document.getElementById('memHint').innerText = t('memHint', { memMb: memTotalMb, memGb: formatApproxGb(memTotalMb) });
             refreshStatus();
-            refreshMessage();
+            renderTerminal();
         }
 
         function extractExitCode(result) {
@@ -226,118 +403,158 @@
             return config;
         }
 
-        function readConfigZramKb(config) {
+        function readConfigZramMb(config) {
+            if (/^\d+$/.test(config.ZRAM_SIZE_MB || '')) {
+                return config.ZRAM_SIZE_MB;
+            }
             if (/^\d+$/.test(config.ZRAM_SIZE_KB || '')) {
-                return config.ZRAM_SIZE_KB;
+                return String(Math.max(1, Math.floor(Number(config.ZRAM_SIZE_KB) / 1024)));
             }
             if (/^\d+$/.test(config.ZRAM_SIZE_GB || '')) {
-                return String(Number(config.ZRAM_SIZE_GB) * 1024 * 1024);
+                return String(Number(config.ZRAM_SIZE_GB) * 1024);
             }
             return '1024';
         }
 
+        function collectValues() {
+            return {
+                zramMb: document.getElementById('zramMb').value.trim(),
+                algo: document.getElementById('algo').value,
+                swap: document.getElementById('swap').value.trim(),
+                wm: document.getElementById('wm').value.trim()
+            };
+        }
+
         function validateValues(values) {
-            const zramKb = Number(values.zramKb);
+            const zramMb = Number(values.zramMb);
             const swap = Number(values.swap);
             const wm = Number(values.wm);
 
-            if (!Number.isInteger(zramKb) || zramKb <= 0) {
-                return t('invalidZram');
-            }
-            if (zramKb > memTotalKb) {
-                return t('invalidZramMax', { memKb: memTotalKb });
-            }
-            if (!Number.isInteger(swap) || swap < 0 || swap > 200) {
-                return t('invalidSwap');
-            }
-            if (!Number.isInteger(wm) || wm <= 0) {
-                return t('invalidWm');
-            }
-            if (!['lz4', 'zstd'].includes(values.algo)) {
+            if (!Number.isInteger(zramMb) || zramMb <= 0) return t('invalidZram');
+            if (zramMb > memTotalMb) return t('invalidZramMax', { memMb: memTotalMb });
+            if (!Number.isInteger(swap) || swap < 0 || swap > 200) return t('invalidSwap');
+            if (!Number.isInteger(wm) || wm <= 0) return t('invalidWm');
+            if (!['lz4', 'zstd', 'lzo', 'lzo-rle', 'lz4k', 'zstdn', 'zstdn_o'].includes(values.algo)) {
                 return t('invalidAlgo');
             }
             return '';
         }
 
+        function buildConfigData(values) {
+            return `ENABLED=1\nZRAM_SIZE_MB=${values.zramMb}\nCOMP_ALGORITHM=${values.algo}\nSWAPPINESS=${values.swap}\nWATERMARK_SCALE_FACTOR=${values.wm}\n`;
+        }
+
+        async function saveConfig(values, clearFirst = false) {
+            const confData = buildConfigData(values);
+            const writeCommand = `cat > ${configPath} <<'EOF'\n${confData}EOF`;
+            if (clearFirst) clearTerminal();
+            appendTerminal(t('saveStart'));
+            await ksu.exec(writeCommand);
+            currentState.enabled = true;
+            setStatus(t('statusSaved'), '#4caf50');
+            appendTerminal(t('saveDone'));
+        }
+
+        async function runEngine() {
+            currentState.executing = true;
+            refreshStatus();
+            const execResult = await execShell(`sh ${enginePath} 2>&1`);
+            if ((execResult.text || '').trim()) {
+                appendTerminal(execResult.text);
+            }
+            currentState.executing = false;
+            currentState.enabled = true;
+
+            if (execResult.code === 0) {
+                setStatus(t('statusApplied'), '#4caf50');
+                return;
+            }
+
+            setStatus(t('statusSaved'), '#ffb74d');
+        }
+
         async function loadConfig() {
             if (typeof ksu === 'undefined') {
                 currentState.loadFailed = true;
-                document.getElementById('status').innerText = t('noKsu');
-                document.getElementById('status').style.color = '#f44336';
+                setStatus(t('noKsu'), '#f44336');
                 return;
             }
 
             try {
-                const memResult = await execShell("awk '/MemTotal/ {print $2}' /proc/meminfo");
-                const parsedMemKb = Number((memResult.text || '').trim());
-                if (Number.isFinite(parsedMemKb) && parsedMemKb > 0) {
-                    memTotalKb = parsedMemKb;
+                const memResult = await execShell("awk '/MemTotal/ {printf \"%d\", $2 / 1024}' /proc/meminfo");
+                const parsedMemMb = Number((memResult.text || '').trim());
+                if (Number.isFinite(parsedMemMb) && parsedMemMb > 0) {
+                    memTotalMb = parsedMemMb;
                 }
 
                 const confResult = await execShell(`cat ${configPath}`);
                 const config = parseConfig(confResult.text || '');
-                const zramKb = readConfigZramKb(config);
-                document.getElementById('zramKb').value = zramKb;
+                document.getElementById('zramMb').value = readConfigZramMb(config);
                 document.getElementById('algo').value = config.COMP_ALGORITHM || 'lz4';
                 document.getElementById('swap').value = config.SWAPPINESS || '80';
                 document.getElementById('wm').value = config.WATERMARK_SCALE_FACTOR || '50';
-                document.getElementById('zramKb').max = String(memTotalKb);
+                document.getElementById('zramMb').max = String(memTotalMb);
                 currentState.enabled = config.ENABLED === '1';
                 currentState.loadFailed = false;
                 applyLanguage(currentLang);
             } catch (error) {
                 currentState.loadFailed = true;
-                document.getElementById('status').innerText = t('readFailed');
-                document.getElementById('status').style.color = '#f44336';
-                setMessage(String(error));
+                setStatus(t('readFailed'), '#f44336');
+                appendTerminal(String(error), 'error');
             }
         }
 
-        async function saveAndApply() {
+        async function handleSave() {
             if (typeof ksu === 'undefined') {
-                setMessage(t('noKsu'));
+                setStatus(t('noKsu'), '#f44336');
                 return;
             }
-
-            const values = {
-                zramKb: document.getElementById('zramKb').value.trim(),
-                algo: document.getElementById('algo').value,
-                swap: document.getElementById('swap').value.trim(),
-                wm: document.getElementById('wm').value.trim()
-            };
-
+            const values = collectValues();
             const error = validateValues(values);
             if (error) {
-                setMessage(`❌ ${error}`);
+                appendTerminal(error, 'error');
+                setStatus(error, '#f44336');
                 return;
             }
-
-            const confData = `ENABLED=1\nZRAM_SIZE_KB=${values.zramKb}\nCOMP_ALGORITHM=${values.algo}\nSWAPPINESS=${values.swap}\nWATERMARK_SCALE_FACTOR=${values.wm}\n`;
-            const writeCommand = `cat > ${configPath} <<'EOF'\n${confData}EOF`;
-
             try {
-                await ksu.exec(writeCommand);
-                const execResult = await execShell(`sh ${actionPath} --plain 2>&1`);
-                currentState.enabled = true;
-                document.getElementById('status').innerText = t('statusApplied');
-                document.getElementById('status').style.color = '#4caf50';
-
-                if (execResult.code === 0) {
-                    setTranslatedMessage('saveSuccess', { details: (execResult.text || '').trim() }, true);
-                } else {
-                    setTranslatedMessage('saveExecFailed', { details: (execResult.text || '').trim() }, false);
-                }
+                await saveConfig(values, false);
             } catch (error) {
-                setTranslatedMessage('saveFailed', { details: String(error) }, false);
+                appendTerminal(t('saveFail', { details: String(error) }), 'error');
+                setStatus(t('readFailed'), '#f44336');
+            }
+        }
+
+        async function handleRun() {
+            if (typeof ksu === 'undefined') {
+                setStatus(t('noKsu'), '#f44336');
+                return;
+            }
+            const values = collectValues();
+            const error = validateValues(values);
+            if (error) {
+                clearTerminal();
+                appendTerminal(error, 'error');
+                setStatus(error, '#f44336');
+                return;
+            }
+            try {
+                await saveConfig(values, true);
+                await runEngine();
+            } catch (error) {
+                currentState.executing = false;
+                appendTerminal(t('saveFail', { details: String(error) }), 'error');
+                setStatus(t('readFailed'), '#f44336');
             }
         }
 
         document.getElementById('langToggle').addEventListener('click', () => {
             applyLanguage(currentLang === 'zh' ? 'en' : 'zh');
         });
+        document.getElementById('saveButton').addEventListener('click', handleSave);
+        document.getElementById('runButton').addEventListener('click', handleRun);
 
         applyLanguage(currentLang);
-        document.getElementById('status').innerText = t('loading');
+        setStatus(t('loading'), '#4caf50');
         loadConfig();
     </script>
 </body>
