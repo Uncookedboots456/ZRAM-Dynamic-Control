@@ -363,7 +363,9 @@
         }
 
         function extractExitCode(result) {
-            if (!result || typeof result === 'string') return 0;
+            if (!result) return 0;
+            if (typeof result.errno === 'number') return result.errno;
+            if (typeof result === 'string') return 0;
             if (typeof result.code === 'number') return result.code;
             if (typeof result.exitCode === 'number') return result.exitCode;
             if (typeof result.status === 'number') return result.status;
@@ -371,18 +373,28 @@
         }
 
         function normalizeExecResult(result) {
-            if (typeof result === 'string') return { text: result, code: 0 };
+            if (typeof result === 'string') {
+                try {
+                    result = JSON.parse(result);
+                } catch (error) {
+                    return { text: result, code: 0 };
+                }
+            }
             if (!result) return { text: '', code: 0 };
-            if (typeof result.stdout === 'string') {
-                return { text: result.stdout, code: extractExitCode(result) };
-            }
-            if (typeof result.stderr === 'string' && !result.stdout) {
-                return { text: result.stderr, code: extractExitCode(result) };
-            }
             if (Array.isArray(result)) {
                 return { text: result.join('\n'), code: 0 };
             }
-            return { text: String(result), code: extractExitCode(result) };
+
+            const code = extractExitCode(result);
+            const text = result.stdout !== undefined
+                ? result.stdout
+                : (result.text !== undefined
+                    ? result.text
+                    : (result.message !== undefined
+                        ? result.message
+                        : String(result)));
+
+            return { text: String(text).trim(), code };
         }
 
         async function execShell(command) {
@@ -413,7 +425,68 @@
             if (/^\d+$/.test(config.ZRAM_SIZE_GB || '')) {
                 return String(Number(config.ZRAM_SIZE_GB) * 1024);
             }
-            return '1024';
+            return '';
+        }
+
+        function normalizePersistedConfig(config) {
+            const zramMb = readConfigZramMb(config);
+            if (!/^\d+$/.test(zramMb)) {
+                throw new Error('Saved ZRAM size is missing or invalid.');
+            }
+
+            const algo = ['lz4', 'zstd', 'lzo', 'lzo-rle', 'lz4k', 'zstdn', 'zstdn_o'].includes(config.COMP_ALGORITHM)
+                ? config.COMP_ALGORITHM
+                : 'lz4';
+            const swap = /^\d+$/.test(config.SWAPPINESS || '') ? config.SWAPPINESS : '80';
+            const wm = /^\d+$/.test(config.WATERMARK_SCALE_FACTOR || '') ? config.WATERMARK_SCALE_FACTOR : '50';
+
+            return {
+                enabled: config.ENABLED === '1',
+                zramMb,
+                algo,
+                swap,
+                wm
+            };
+        }
+
+        function applyPersistedConfig(values) {
+            document.getElementById('zramMb').value = values.zramMb;
+            document.getElementById('algo').value = values.algo;
+            document.getElementById('swap').value = values.swap;
+            document.getElementById('wm').value = values.wm;
+        }
+
+        async function readPersistedConfig() {
+            const confResult = await execShell(`cat ${configPath}`);
+            if (confResult.code !== 0) {
+                throw new Error((confResult.text || 'Failed to read config.conf.').trim());
+            }
+
+            const rawText = String(confResult.text || '').trim();
+            if (!rawText) {
+                throw new Error('config.conf is empty.');
+            }
+
+            const config = parseConfig(rawText);
+            return {
+                config,
+                values: normalizePersistedConfig(config)
+            };
+        }
+
+        function verifyPersistedValues(values, persistedValues) {
+            const expected = {
+                enabled: true,
+                zramMb: String(values.zramMb),
+                algo: String(values.algo),
+                swap: String(values.swap),
+                wm: String(values.wm)
+            };
+
+            const matches = Object.keys(expected).every((key) => String(persistedValues[key]) === expected[key]);
+            if (!matches) {
+                throw new Error('Saved values do not match the requested configuration.');
+            }
         }
 
         function collectValues() {
@@ -444,13 +517,27 @@
             return `ENABLED=1\nZRAM_SIZE_MB=${values.zramMb}\nCOMP_ALGORITHM=${values.algo}\nSWAPPINESS=${values.swap}\nWATERMARK_SCALE_FACTOR=${values.wm}\n`;
         }
 
+        function shellSingleQuote(text) {
+            return `'${String(text).replaceAll("'", "'\"'\"'")}'`;
+        }
+
         async function saveConfig(values, clearFirst = false) {
             const confData = buildConfigData(values);
-            const writeCommand = `cat > ${configPath} <<'EOF'\n${confData}EOF`;
+            const quotedConfData = shellSingleQuote(confData);
+            const writeCommand = `TMP_CONF="${configPath}.tmp.$$" && printf %s ${quotedConfData} > "$TMP_CONF" && mv "$TMP_CONF" "${configPath}"`;
             if (clearFirst) clearTerminal();
             appendTerminal(t('saveStart'));
-            await ksu.exec(writeCommand);
-            currentState.enabled = true;
+
+            const writeResult = await execShell(writeCommand);
+            if (writeResult.code !== 0) {
+                throw new Error((writeResult.text || 'Failed to write config.conf.').trim());
+            }
+
+            const persisted = await readPersistedConfig();
+            verifyPersistedValues(values, persisted.values);
+            applyPersistedConfig(persisted.values);
+            currentState.enabled = persisted.values.enabled;
+            currentState.loadFailed = false;
             setStatus(t('statusSaved'), '#4caf50');
             appendTerminal(t('saveDone'));
         }
@@ -487,14 +574,10 @@
                     memTotalMb = parsedMemMb;
                 }
 
-                const confResult = await execShell(`cat ${configPath}`);
-                const config = parseConfig(confResult.text || '');
-                document.getElementById('zramMb').value = readConfigZramMb(config);
-                document.getElementById('algo').value = config.COMP_ALGORITHM || 'lz4';
-                document.getElementById('swap').value = config.SWAPPINESS || '80';
-                document.getElementById('wm').value = config.WATERMARK_SCALE_FACTOR || '50';
+                const persisted = await readPersistedConfig();
+                applyPersistedConfig(persisted.values);
                 document.getElementById('zramMb').max = String(memTotalMb);
-                currentState.enabled = config.ENABLED === '1';
+                currentState.enabled = persisted.values.enabled;
                 currentState.loadFailed = false;
                 applyLanguage(currentLang);
             } catch (error) {

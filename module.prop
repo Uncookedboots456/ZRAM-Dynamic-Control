@@ -1,6 +1,6 @@
 id=zram_12g_uncookedboot
 name=ZRAM 动态控制核心
-version=v1.6.3
-versionCode=15
+version=pre_release 1.6.4
+versionCode=16
 author=UncookedBoot
-description=MB 旧逻辑基线版。WebUI 重构为保存/执行双按钮，新增仿终端输出与实验性压缩协议选项。
+description=Pre-release 1.6.4. Fixes WebUI persistence parsing, English shell notifications, and 30s delayed boot apply.

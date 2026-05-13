@@ -53,6 +53,7 @@
 ### ⚠️ 用户须知
 * **容量限制:** ZRAM 目标值必须小于或等于设备物理内存的 MB 上限。
 * **启用方式:** 安装后不会自动接管；需通过 WebUI 保存配置并执行 action，或先保存后等待下次开机应用。
+* **通知权限:** 若设备较新，系统可能要求你在设置中手动允许 `Shell/终端` 发送通知，否则底层应用成功后可能只有日志记录而没有弹窗。
 * **冲突说明:** 若设备中存在持续轮询并强制锁定 ZRAM 的其他守护进程，本模块的应用结果可能被覆盖。
 * **免责声明:** 修改 Linux 内核底层节点具有一定风险。作者不对因极端内存调度导致的设备卡顿、数据丢失或重启负责。
 
@@ -99,5 +100,6 @@ The module can still apply automatically after the next boot delay.
 
 * **Capacity Limit:** The target ZRAM size must be less than or equal to the device physical-memory limit in MB.
 * **Enablement:** The module will not take control until a config is saved and executed.
+* **Notification Permission:** On newer Android versions, you may need to manually allow notifications for `Shell/Terminal`, or a successful apply may only appear in system logs.
 * **Conflict Warning:** Other performance daemons may still override the applied ZRAM size later.
 * **Disclaimer:** Low-level kernel changes always carry risk; the author is not responsible for instability, lag, or data loss.

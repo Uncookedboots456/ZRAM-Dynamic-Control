@@ -43,12 +43,21 @@ is_non_negative_integer() {
     esac
 }
 
+escape_for_single_quotes() {
+    printf "%s" "$1" | sed "s/'/'\\\\''/g"
+}
+
 notify_result() {
-    local title text
+    local title text safe_title safe_text
     title="$1"
     text="$2"
+    if command -v log >/dev/null 2>&1; then
+        log -t zram_dynamic_control "$title: $text"
+    fi
     if command -v cmd >/dev/null 2>&1; then
-        cmd notification post -t "$title" zram_dynamic_control "$text" >/dev/null 2>&1
+        safe_title=$(escape_for_single_quotes "$title")
+        safe_text=$(escape_for_single_quotes "$text")
+        su 2000 -c "cmd notification post -S null -t '$safe_title' zram_dynamic_control '$safe_text'" >/dev/null 2>&1
     fi
 }
 
@@ -57,7 +66,7 @@ fail() {
     code="$1"
     message="$2"
     echo "$message"
-    notify_result "ZRAM 生效失败" "$message"
+    notify_result "ZRAM apply failed" "$message"
     exit "$code"
 }
 
@@ -177,5 +186,5 @@ if ! echo "$WATERMARK_SCALE" > /proc/sys/vm/watermark_scale_factor; then
 fi
 
 echo "[√] 所有底层操作已完成。"
-notify_result "ZRAM 已生效" "${ZRAM_SIZE_MB}MB (~${TARGET_ZRAM_GB}GB) / ${COMP_ALGORITHM} 已成功生效"
+notify_result "ZRAM applied" "${ZRAM_SIZE_MB}MB | ${COMP_ALGORITHM}"
 exit 0
