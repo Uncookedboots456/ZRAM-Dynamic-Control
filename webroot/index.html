@@ -146,7 +146,11 @@
     </div>
 
     <script>
-        const modPath = '/data/adb/modules/zram_12g_uncookedboot';
+        const currentPath = window.location.pathname;
+        const webrootIndex = currentPath.lastIndexOf('/webroot/');
+        const modPath = webrootIndex >= 0
+            ? currentPath.substring(0, webrootIndex)
+            : currentPath.substring(0, currentPath.lastIndexOf('/'));
         const configPath = `${modPath}/config.conf`;
         const enginePath = `${modPath}/zram_ctrl.sh`;
         let memTotalMb = 1024;
@@ -449,6 +453,16 @@
             };
         }
 
+        function getDefaultPersistedState() {
+            return {
+                enabled: false,
+                zramMb: '1024',
+                algo: 'lz4',
+                swap: '80',
+                wm: '50'
+            };
+        }
+
         function applyPersistedConfig(values) {
             document.getElementById('zramMb').value = values.zramMb;
             document.getElementById('algo').value = values.algo;
@@ -456,21 +470,45 @@
             document.getElementById('wm').value = values.wm;
         }
 
-        async function readPersistedConfig() {
-            const confResult = await execShell(`cat ${configPath}`);
-            if (confResult.code !== 0) {
-                throw new Error((confResult.text || 'Failed to read config.conf.').trim());
+        async function readPersistedConfig({ allowDefault = true } = {}) {
+            const checkCommand = `[ -f "${configPath}" ] && [ -r "${configPath}" ] && echo "OK" || echo "FAIL"`;
+            const checkResult = await execShell(checkCommand);
+            if (String(checkResult.text || '').trim() !== 'OK') {
+                if (allowDefault) {
+                    return {
+                        config: {},
+                        values: getDefaultPersistedState()
+                    };
+                }
+                throw new Error('config.conf is missing or unreadable.');
             }
 
+            const confResult = await execShell(`cat "${configPath}"`);
+            if (confResult.code !== 0) {
+                if (allowDefault) {
+                    return {
+                        config: {},
+                        values: getDefaultPersistedState()
+                    };
+                }
+                throw new Error((confResult.text || 'Failed to read config.conf.').trim());
+            }
             const rawText = String(confResult.text || '').trim();
             if (!rawText) {
+                if (allowDefault) {
+                    return {
+                        config: {},
+                        values: getDefaultPersistedState()
+                    };
+                }
                 throw new Error('config.conf is empty.');
             }
 
             const config = parseConfig(rawText);
+            const values = normalizePersistedConfig(config);
             return {
                 config,
-                values: normalizePersistedConfig(config)
+                values
             };
         }
 
@@ -524,7 +562,7 @@
         async function saveConfig(values, clearFirst = false) {
             const confData = buildConfigData(values);
             const quotedConfData = shellSingleQuote(confData);
-            const writeCommand = `TMP_CONF="${configPath}.tmp.$$" && printf %s ${quotedConfData} > "$TMP_CONF" && mv "$TMP_CONF" "${configPath}"`;
+            const writeCommand = `printf %s ${quotedConfData} > "${configPath}"`;
             if (clearFirst) clearTerminal();
             appendTerminal(t('saveStart'));
 
@@ -533,7 +571,7 @@
                 throw new Error((writeResult.text || 'Failed to write config.conf.').trim());
             }
 
-            const persisted = await readPersistedConfig();
+            const persisted = await readPersistedConfig({ allowDefault: false });
             verifyPersistedValues(values, persisted.values);
             applyPersistedConfig(persisted.values);
             currentState.enabled = persisted.values.enabled;

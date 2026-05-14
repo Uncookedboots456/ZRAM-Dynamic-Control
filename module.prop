@@ -1,6 +1,6 @@
 id=zram_12g_uncookedboot
 name=ZRAM 动态控制核心
-version=pre_release 1.6.4
-versionCode=16
+version=pre_release 1.6.4-2
+versionCode=17
 author=UncookedBoot
-description=Pre-release 1.6.4. Fixes WebUI persistence parsing, English shell notifications, and 30s delayed boot apply.
+description=Pre-release 1.6.4-2. Fixes WebUI path resolution, direct config overwrite, permission baseline, and shell compatibility.
