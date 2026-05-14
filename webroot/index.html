@@ -146,13 +146,10 @@
     </div>
 
     <script>
-        const currentPath = window.location.pathname;
-        const webrootIndex = currentPath.lastIndexOf('/webroot/');
-        const modPath = webrootIndex >= 0
-            ? currentPath.substring(0, webrootIndex)
-            : currentPath.substring(0, currentPath.lastIndexOf('/'));
-        const configPath = `${modPath}/config.conf`;
-        const enginePath = `${modPath}/zram_ctrl.sh`;
+        const MOD_ID = 'zram_12g_uncookedboot';
+        let modPath = '';
+        let configPath = '';
+        let enginePath = '';
         let memTotalMb = 1024;
         let currentLang = (typeof localStorage !== 'undefined' && localStorage.getItem('zram_ui_lang')) || 'zh';
         let currentState = { enabled: false, loadFailed: false, executing: false };
@@ -406,6 +403,34 @@
             return normalizeExecResult(result);
         }
 
+        async function resolveModulePath() {
+            if (modPath && configPath && enginePath) {
+                return modPath;
+            }
+
+            const probeScript = `
+MOD_ID="${MOD_ID}"
+for base in /data/adb/modules /data/adb/ksu/modules /data/adb/apmodules; do
+    if [ -d "$base/$MOD_ID" ]; then
+        printf %s "$base/$MOD_ID"
+        exit 0
+    fi
+done
+exit 1
+`.trim();
+
+            const result = await execShell(probeScript);
+            const resolved = String(result.text || '').trim();
+            if (result.code !== 0 || !resolved) {
+                throw new Error('Module path probe failed.');
+            }
+
+            modPath = resolved;
+            configPath = `${modPath}/config.conf`;
+            enginePath = `${modPath}/zram_ctrl.sh`;
+            return modPath;
+        }
+
         function parseConfig(text) {
             const config = {};
             text.split(/\r?\n/).forEach((line) => {
@@ -555,20 +580,16 @@
             return `ENABLED=1\nZRAM_SIZE_MB=${values.zramMb}\nCOMP_ALGORITHM=${values.algo}\nSWAPPINESS=${values.swap}\nWATERMARK_SCALE_FACTOR=${values.wm}\n`;
         }
 
-        function shellSingleQuote(text) {
-            return `'${String(text).replaceAll("'", "'\"'\"'")}'`;
-        }
-
         async function saveConfig(values, clearFirst = false) {
             const confData = buildConfigData(values);
-            const quotedConfData = shellSingleQuote(confData);
-            const writeCommand = `printf %s ${quotedConfData} > "${configPath}"`;
+            const writeCommand = `cat << 'EOF' > "${configPath}"
+${confData}EOF`;
             if (clearFirst) clearTerminal();
             appendTerminal(t('saveStart'));
 
             const writeResult = await execShell(writeCommand);
             if (writeResult.code !== 0) {
-                throw new Error((writeResult.text || 'Failed to write config.conf.').trim());
+                throw new Error(`Write failed (Code: ${writeResult.code}): ${String(writeResult.text || '').trim()}`);
             }
 
             const persisted = await readPersistedConfig({ allowDefault: false });
@@ -606,6 +627,7 @@
             }
 
             try {
+                await resolveModulePath();
                 const memResult = await execShell("awk '/MemTotal/ {printf \"%d\", $2 / 1024}' /proc/meminfo");
                 const parsedMemMb = Number((memResult.text || '').trim());
                 if (Number.isFinite(parsedMemMb) && parsedMemMb > 0) {
@@ -630,6 +652,11 @@
                 setStatus(t('noKsu'), '#f44336');
                 return;
             }
+            if (!modPath || !configPath || !enginePath) {
+                appendTerminal('Module path probe failed.', 'error');
+                setStatus(t('readFailed'), '#f44336');
+                return;
+            }
             const values = collectValues();
             const error = validateValues(values);
             if (error) {
@@ -641,13 +668,18 @@
                 await saveConfig(values, false);
             } catch (error) {
                 appendTerminal(t('saveFail', { details: String(error) }), 'error');
-                setStatus(t('readFailed'), '#f44336');
+                setStatus(String(error), '#f44336');
             }
         }
 
         async function handleRun() {
             if (typeof ksu === 'undefined') {
                 setStatus(t('noKsu'), '#f44336');
+                return;
+            }
+            if (!modPath || !configPath || !enginePath) {
+                appendTerminal('Module path probe failed.', 'error');
+                setStatus(t('readFailed'), '#f44336');
                 return;
             }
             const values = collectValues();
@@ -664,7 +696,7 @@
             } catch (error) {
                 currentState.executing = false;
                 appendTerminal(t('saveFail', { details: String(error) }), 'error');
-                setStatus(t('readFailed'), '#f44336');
+                setStatus(String(error), '#f44336');
             }
         }
 
