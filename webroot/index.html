@@ -171,6 +171,7 @@
                 statusEnabled: '当前状态：已启用。\n左侧保存配置，右侧执行 action 立即生效。',
                 statusDisabled: '当前状态：未启用。\n先保存配置，再通过执行 action 启用并执行。',
                 statusSaved: '当前状态：配置已保存。\n可点击右侧执行 action 立即生效。',
+                statusScenePending: '当前状态：配置已同步给 Scene。\nScene 会在下次开机应用。',
                 statusApplied: '当前状态：已启用，本次执行已完成。',
                 statusApplying: '当前状态：正在执行 action，请查看下方终端输出。',
                 memHint: '物理内存上限 {memMb}MB (~{memGb}GB)。请直接输入目标 MB 值。',
@@ -199,6 +200,7 @@
                 statusEnabled: 'Current state: enabled.\nUse the left button to save, or run action from the right button.',
                 statusDisabled: 'Current state: disabled.\nSave the config first, then run action to enable and apply it.',
                 statusSaved: 'Current state: configuration saved.\nUse the Run action button to apply it now.',
+                statusScenePending: 'Current state: configuration is synced to Scene.\nScene will apply it on the next boot.',
                 statusApplied: 'Current state: enabled. The latest action has completed.',
                 statusApplying: 'Current state: running action. Check the terminal output below.',
                 memHint: 'Physical memory limit: {memMb}MB (~{memGb}GB). Enter the target value directly in MB.',
@@ -562,6 +564,9 @@ exit 1
         }
 
         function validateValues(values) {
+            if (!/^\d+$/.test(values.zramMb)) return t('invalidZram');
+            if (!/^\d+$/.test(values.swap)) return t('invalidSwap');
+            if (!/^\d+$/.test(values.wm)) return t('invalidWm');
             const zramMb = Number(values.zramMb);
             const swap = Number(values.swap);
             const wm = Number(values.wm);
@@ -577,13 +582,25 @@ exit 1
         }
 
         function buildConfigData(values) {
-            return `ENABLED=1\nZRAM_SIZE_MB=${values.zramMb}\nCOMP_ALGORITHM=${values.algo}\nSWAPPINESS=${values.swap}\nWATERMARK_SCALE_FACTOR=${values.wm}\n`;
+            return `ENABLED=1\nZRAM_SIZE_MB=${values.zramMb}\nCOMP_ALGORITHM=${values.algo}\nSWAPPINESS=${values.swap}\nWATERMARK_SCALE_FACTOR=${values.wm}\nMIN_SWAPOFF_HEADROOM_MB=1024\n`;
         }
 
-        async function saveConfig(values, clearFirst = false) {
+        async function syncSceneConfig() {
+            const result = await execShell(`sh "${enginePath}" --sync 2>&1`);
+            if ((result.text || '').trim() && !String(result.text).includes('SYNC_SKIPPED=1')) {
+                appendTerminal(result.text);
+            }
+            if (result.code !== 0) {
+                throw new Error(`Scene sync failed (Code: ${result.code}): ${String(result.text || '').trim()}`);
+            }
+        }
+
+        async function saveConfig(values, clearFirst = false, syncScene = true) {
             const confData = buildConfigData(values);
-            const writeCommand = `cat << 'EOF' > "${configPath}"
-${confData}EOF`;
+            const writeCommand = `tmp=$(mktemp "${configPath}.XXXXXX") || exit 1
+cat << 'EOF' > "$tmp"
+${confData}EOF
+chmod 0644 "$tmp" && mv -f "$tmp" "${configPath}"`;
             if (clearFirst) clearTerminal();
             appendTerminal(t('saveStart'));
 
@@ -599,17 +616,23 @@ ${confData}EOF`;
             currentState.loadFailed = false;
             setStatus(t('statusSaved'), '#4caf50');
             appendTerminal(t('saveDone'));
+            if (syncScene) await syncSceneConfig();
         }
 
         async function runEngine() {
             currentState.executing = true;
             refreshStatus();
-            const execResult = await execShell(`sh ${enginePath} 2>&1`);
+            const execResult = await execShell(`sh "${enginePath}" 2>&1`);
             if ((execResult.text || '').trim()) {
                 appendTerminal(execResult.text);
             }
             currentState.executing = false;
             currentState.enabled = true;
+
+            if (String(execResult.text || '').includes('SCENE_DEFERRED=1')) {
+                setStatus(t('statusScenePending'), '#ffb74d');
+                return;
+            }
 
             if (execResult.code === 0) {
                 setStatus(t('statusApplied'), '#4caf50');
@@ -691,7 +714,7 @@ ${confData}EOF`;
                 return;
             }
             try {
-                await saveConfig(values, true);
+                await saveConfig(values, true, false);
                 await runEngine();
             } catch (error) {
                 currentState.executing = false;
