@@ -1,6 +1,7 @@
 #!/system/bin/sh
 SKIPUNZIP=0
 MODDIR=${0%/*}
+[ -d "$MODDIR" ] || MODDIR=$PWD
 CONF="$MODDIR/config.conf"
 
 read_current_algorithm() {

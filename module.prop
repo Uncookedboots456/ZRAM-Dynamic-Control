@@ -1,6 +1,6 @@
 id=zram_12g_uncookedboot
 name=ZRAM 动态控制核心
-version=pre_release 1.6.5-1
-versionCode=18
+version=pre_release 1.6.5-2
+versionCode=19
 author=UncookedBoot
-description=Pre-release 1.6.5-1. Adds safe Scene-controller coexistence, boot verification, and notifications.
+description=Pre-release 1.6.5-2. Fixes installer module-path detection and adds safe Scene-controller coexistence.
