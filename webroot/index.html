@@ -435,7 +435,7 @@ exit 1
 
         function parseConfig(text) {
             const config = {};
-            text.split(/\r?\n/).forEach((line) => {
+            text.split(/[\r\n|]+/).forEach((line) => {
                 const index = line.indexOf('=');
                 if (index > 0) {
                     const key = line.slice(0, index).trim();
@@ -510,7 +510,9 @@ exit 1
                 throw new Error('config.conf is missing or unreadable.');
             }
 
-            const confResult = await execShell(`cat "${configPath}"`);
+            // SukiSU 4.1.3 keeps only the last stdout line from ksu.exec().
+            // Serialize the config to one line before crossing the bridge.
+            const confResult = await execShell(`tr '\n' '|' < "${configPath}"`);
             if (confResult.code !== 0) {
                 if (allowDefault) {
                     return {
@@ -651,8 +653,9 @@ chmod 0644 "$tmp" && mv -f "$tmp" "${configPath}"`;
 
             try {
                 await resolveModulePath();
-                const memResult = await execShell("awk '/MemTotal/ {printf \"%d\", $2 / 1024}' /proc/meminfo");
-                const parsedMemMb = Number((memResult.text || '').trim());
+                const memResult = await execShell('grep -m 1 MemTotal /proc/meminfo');
+                const memMatch = String(memResult.text || '').match(/\d+/);
+                const parsedMemMb = memMatch ? Math.floor(Number(memMatch[0]) / 1024) : 0;
                 if (Number.isFinite(parsedMemMb) && parsedMemMb > 0) {
                     memTotalMb = parsedMemMb;
                 }

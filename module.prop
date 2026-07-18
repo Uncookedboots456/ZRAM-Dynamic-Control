@@ -1,6 +1,6 @@
 id=zram_12g_uncookedboot
 name=ZRAM 动态控制核心
-version=pre_release 1.6.5-4
-versionCode=21
+version=pre_release 1.6.5-5
+versionCode=22
 author=UncookedBoot
-description=Pre-release 1.6.5-4. Uses BusyBox file locking for safe Scene-controller coexistence.
+description=Pre-release 1.6.5-5. Adds SukiSU WebUI single-line config read compatibility.
