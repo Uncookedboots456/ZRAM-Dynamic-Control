@@ -1,6 +1,6 @@
 id=zram_12g_uncookedboot
 name=ZRAM 动态控制核心
-version=pre_release 1.6.5-2
-versionCode=19
+version=pre_release 1.6.5-4
+versionCode=21
 author=UncookedBoot
-description=Pre-release 1.6.5-2. Fixes installer module-path detection and adds safe Scene-controller coexistence.
+description=Pre-release 1.6.5-4. Uses BusyBox file locking for safe Scene-controller coexistence.

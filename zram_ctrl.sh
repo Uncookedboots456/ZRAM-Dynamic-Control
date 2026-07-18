@@ -1,7 +1,13 @@
 #!/system/bin/sh
 MODDIR=${0%/*}
 CONF="$MODDIR/config.conf"
-MODE=${1:-apply}
+if [ "$1" = '--locked' ]; then
+    MODE=${2:-apply}
+    LOCK_HELD=1
+else
+    MODE=${1:-apply}
+    LOCK_HELD=0
+fi
 LOCK_FILE="$MODDIR/.zram_ctrl.lock"
 SCENE_MODDIR=/data/adb/modules/scene_swap_controller
 SCENE_CONF=/data/swap_config.conf
@@ -199,9 +205,16 @@ if [ "$ENABLED" != 1 ] && [ "$MODE" != '--check' ]; then
     exit 10
 fi
 
-command -v flock >/dev/null 2>&1 || fail 9 '[x] 缺少 flock，无法保证单实例执行。'
-exec 9>"$LOCK_FILE" || fail 9 '[x] 无法创建 ZRAM 执行锁。'
-flock -n 9 || fail 9 '[x] ZRAM 操作正在执行中。'
+if [ "$LOCK_HELD" != 1 ]; then
+    for busybox in /data/adb/ksu/bin/busybox /data/adb/magisk/busybox; do
+        [ -x "$busybox" ] || continue
+        "$busybox" flock -n "$LOCK_FILE" /system/bin/sh "$0" --locked "$MODE"
+        lock_status=$?
+        [ "$lock_status" -eq 1 ] && fail 9 '[x] ZRAM 操作正在执行中。'
+        exit "$lock_status"
+    done
+    fail 9 '[x] 缺少 BusyBox flock，无法保证单实例执行。'
+fi
 
 validate_config
 

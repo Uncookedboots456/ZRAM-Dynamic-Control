@@ -1,6 +1,6 @@
 #!/system/bin/sh
 SKIPUNZIP=0
-MODDIR=${0%/*}
+MODDIR=${MODPATH:-${0%/*}}
 [ -d "$MODDIR" ] || MODDIR=$PWD
 CONF="$MODDIR/config.conf"
 
