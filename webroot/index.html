@@ -583,10 +583,6 @@ exit 1
             return '';
         }
 
-        function buildConfigData(values) {
-            return `ENABLED=1\nZRAM_SIZE_MB=${values.zramMb}\nCOMP_ALGORITHM=${values.algo}\nSWAPPINESS=${values.swap}\nWATERMARK_SCALE_FACTOR=${values.wm}\nMIN_SWAPOFF_HEADROOM_MB=1024\n`;
-        }
-
         async function syncSceneConfig() {
             const result = await execShell(`sh "${enginePath}" --sync 2>&1`);
             if ((result.text || '').trim() && !String(result.text).includes('SYNC_SKIPPED=1')) {
@@ -598,11 +594,7 @@ exit 1
         }
 
         async function saveConfig(values, clearFirst = false, syncScene = true) {
-            const confData = buildConfigData(values);
-            const writeCommand = `tmp=$(mktemp "${configPath}.XXXXXX") || exit 1
-cat << 'EOF' > "$tmp"
-${confData}EOF
-chmod 0644 "$tmp" && mv -f "$tmp" "${configPath}"`;
+            const writeCommand = `tmp=$(mktemp "${configPath}.XXXXXX") || exit 1; printf '%s\\n' 'ENABLED=1' 'ZRAM_SIZE_MB=${values.zramMb}' 'COMP_ALGORITHM=${values.algo}' 'SWAPPINESS=${values.swap}' 'WATERMARK_SCALE_FACTOR=${values.wm}' 'MIN_SWAPOFF_HEADROOM_MB=1024' > "$tmp" && chmod 0644 "$tmp" && mv -f "$tmp" "${configPath}"`;
             if (clearFirst) clearTerminal();
             appendTerminal(t('saveStart'));
 

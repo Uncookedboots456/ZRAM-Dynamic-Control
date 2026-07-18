@@ -1,6 +1,6 @@
 id=zram_12g_uncookedboot
 name=ZRAM 动态控制核心
-version=pre_release 1.6.5-5
-versionCode=22
+version=pre_release 1.6.5-6
+versionCode=23
 author=UncookedBoot
-description=Pre-release 1.6.5-5. Adds SukiSU WebUI single-line config read compatibility.
+description=Pre-release 1.6.5-6. Uses single-line WebUI config writes for SukiSU compatibility.
