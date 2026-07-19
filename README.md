@@ -1,105 +1,56 @@
-# ZRAM-Dynamic-Control
-⚡ A script-only, hot-reloadable ZRAM dynamic controller for modern Android devices (KernelSU/Magisk).
+# ZRAM Dynamic Control
 
-# ZRAM Dynamic Control (ZRAM 动态控制核心)
+Android ZRAM controller for KernelSU, Magisk, and APatch. Version 1.7 adds safe cooperation with Scene's ZRAM controller instead of letting two modules write the same kernel nodes.
 
-🌍 *[English Version Below](#english-version)*
+## 中文
 
-这是一个专为现代 Android 环境设计的轻量级 ZRAM 动态调度核心。采用彻底解耦的纯脚本架构，并在 `v1.6.3` 回到旧逻辑基线后，通过 WebUI 完成 MB 配置、保存/执行分离、仿终端输出、通知反馈与中英切换。
+### 功能
 
-**创作者:** UncookedBoot (大海兲)  
-**协议:** GPLv3  
-**兼容性:** KernelSU / Magisk / APatch 
+- WebUI 保存 `ZRAM_SIZE_MB`、压缩算法、Swappiness 与 Watermark Scale。
+- 普通模式下由模块应用配置；安装后默认不接管现有 ZRAM。
+- 检测到已启用的 Scene ZRAM 控制器时，本模块不写 sysfs、不重建 swap；仅原子更新 `/data/swap_config.conf`，由 Scene 在下次开机应用。
+- 开机在 Scene 模式下校验实际值，并通过系统通知报告成功或失败。
+- 校验容量、数值范围和内核实际支持的压缩算法；配置写入采用临时文件原子替换。
 
----
+### 安装与使用
 
-## 🇨🇳 中文说明
+1. 在 Releases 下载 ZIP，通过 KernelSU、Magisk 或 APatch 安装。
+2. 在管理器中打开模块 WebUI，填写目标参数后点击 **保存**。
+3. 未使用 Scene 时，可点击 **执行 action** 立即应用；使用 Scene 时会显示 `SCENE_DEFERRED=1`，表示配置已交给 Scene，运行态保持不被本模块直接修改。
+4. 重启后查看系统通知；也可检查 `/data/swap_config.conf` 与 `/sys/block/zram0/`。
 
-### 💡 核心原理
+### Scene 共存边界
 
-本模块采用现代化的脚本式模块架构：
-* **Script-Only 架构:** 不依赖传统 Magic Mount，对深度定制系统更友好。
-* **安装即读取，不默认接管:** 安装阶段自动读取设备当前 ZRAM 与 VM 参数，写入配置文件，但默认保持未启用状态。
-* **MB 配置:** 配置主字段为 `ZRAM_SIZE_MB`，同时兼容读取旧版 `KB / GB` 配置。
-* **WebUI 双按钮交互:** WebUI 分为 `📦 保存` 与 `🚀 执行 action` 两个动作；保存只写入配置，执行 action 会保存后再立刻触发核心脚本。
-* **统一通知:** 开机自动应用与 WebUI `🚀 执行 action`，都会在每次实际尝试生效后发送系统通知。
-* **中英切换:** WebUI 右上角新增 `🌐` 按钮，可在中文和英文界面之间切换。
-* **仿终端反馈:** WebUI 底部新增仿终端窗口，尽量贴近原脚本终端输出，并可随语言切换显示英文版。
-* **实验性协议:** 新增 `lzo`、`lzo-rle`、`lz4k`、`zstdn`、`zstdn_o` 选项；若内核不支持，失败信息会直接显示在终端窗口。
-* **安全保护:** ZRAM 容量不得超过设备物理内存的 MB 上限，前端与脚本端双重校验。
+Scene 已启用时，Scene 是唯一的 ZRAM/VM 写入者。本模块只负责配置同步、开机校验和通知。这避免两个控制器同时 `swapoff`、重建 ZRAM 或互相覆盖参数。
 
-### 🚀 使用指南
+### v1.7.0
 
-**1. 初始部署**  
-在 Releases 页面下载 `.zip` 刷机包，通过 KernelSU/Magisk/APatch 刷入。安装终端会显示当前设备的物理内存 MB、当前 ZRAM MB、压缩算法以及 VM 参数，并生成初始化配置。
+- 新增 Scene 协作模式与开机校验通知。
+- 修复 SukiSU WebUI 多行桥接输出截断：配置读取改为单行序列化。
+- 修复 WebUI 写入：使用单行原子 `printf` 写入，不依赖 heredoc。
+- 修复写后校验的布尔/字符串类型比较错误。
+- 修复 MMRS 安装路径解析，并使用 KernelSU BusyBox 文件锁。
+- 已在 Android 16 / SukiSU Ultra 4.1.3 / Scene 4.2.4 真机验证保存、Scene 同步、action 延迟应用和开机通知。
 
-**2. 默认状态**  
-模块安装后默认 **未启用**，不会主动修改当前系统的 ZRAM。此时配置文件仅保存当前设备状态快照。
+## English
 
-**3. WebUI 配置与执行**  
-进入模块 WebUI 后，直接填写目标 `ZRAM 容量 (MB)`，再设置压缩算法、Swappiness 与 Watermark Scale。点击 **`📦 保存`** 会写入配置并启用模块；点击 **`🚀 执行 action`** 会保存当前配置后立刻调用核心脚本尝试生效。页面底部仿终端窗口会尽量按原终端格式显示本次运行输出，点击右上角 `🌐` 可切换中英界面。
+### What it does
 
-**4. 其他执行方式**  
-若不手动执行，则会在下次开机延迟自动应用。
+- Saves ZRAM size, compression algorithm, swappiness, and watermark scale from a WebUI.
+- Applies settings directly when it is the only controller.
+- When Scene's ZRAM controller is active, it never writes ZRAM sysfs nodes or rebuilds swap. It atomically updates `/data/swap_config.conf`; Scene applies it at the next boot.
+- Verifies the applied Scene values at boot and posts a best-effort system notification.
 
-### ✅ v1.6.3 更新日志
+### v1.7.0
 
-* 回到 `v1.6.1` 的旧逻辑基线，不再引入 Scene 相关策略。
-* WebUI 操作拆分为 `📦 保存` 与 `🚀 执行 action`，并改为同一行左右分列。
-* 页面下方新增仿终端窗口，执行输出尽量贴近原脚本终端内容。
-* 终端输出现在也支持中英切换，英文模式下会显示对应英文日志。
-* 新增实验性压缩协议选项：`lzo`、`lzo-rle`、`lz4k`、`zstdn`、`zstdn_o`。
+- Added Scene cooperative mode and boot verification notifications.
+- Fixed SukiSU WebUI bridge compatibility for config reads, atomic writes, and post-write verification.
+- Verified on Android 16 with SukiSU Ultra 4.1.3 and Scene 4.2.4.
 
-### ⚠️ 用户须知
-* **容量限制:** ZRAM 目标值必须小于或等于设备物理内存的 MB 上限。
-* **启用方式:** 安装后不会自动接管；需通过 WebUI 保存配置并执行 action，或先保存后等待下次开机应用。
-* **通知权限:** 若设备较新，系统可能要求你在设置中手动允许 `Shell/终端` 发送通知，否则底层应用成功后可能只有日志记录而没有弹窗。
-* **冲突说明:** 若设备中存在持续轮询并强制锁定 ZRAM 的其他守护进程，本模块的应用结果可能被覆盖。
-* **免责声明:** 修改 Linux 内核底层节点具有一定风险。作者不对因极端内存调度导致的设备卡顿、数据丢失或重启负责。
+## Safety
 
----
+Changing low-level memory settings can cause lag or instability. Keep one ZRAM controller enabled at a time; if Scene is detected, this module intentionally delegates runtime application to Scene.
 
-## 🇬🇧 English Version
+## License
 
-### 💡 Principles
-
-This module uses a modern script-only architecture:
-* **Script-Only Design:** No traditional Magic Mount dependency, making it friendlier to customized ROM environments.
-* **Read Current State on Install:** During installation, the module reads the current ZRAM and VM settings into the config file but stays disabled by default.
-* **MB Configuration:** The main capacity field is `ZRAM_SIZE_MB`, while older `KB / GB` configs remain readable for compatibility.
-* **Two-Button WebUI Flow:** The WebUI now separates `📦 Save` and `🚀 Run action`. Save only writes the config, while Run action saves first and then executes the core script immediately.
-* **Unified Notifications:** Boot auto-apply and the WebUI `🚀 Run action` path both post a system notification after each real apply attempt.
-* **Language Toggle:** The WebUI now includes a `🌐` button in the top-right corner to switch between Chinese and English.
-* **Terminal-Style Feedback:** A terminal-like output pane shows execution logs in a format close to the original shell output, with English rendering when the UI language is switched.
-* **Experimental Algorithms:** Added `lzo`, `lzo-rle`, `lz4k`, `zstdn`, and `zstdn_o`; unsupported kernel behavior is shown directly in the terminal output.
-* **Safety Validation:** Target ZRAM size must not exceed the device physical-memory limit in MB, enforced by both the WebUI and shell script.
-
-### 🚀 Usage Guide
-
-**1. Installation**  
-Download the release `.zip`, flash it via KernelSU/Magisk/APatch, and review the installer output for physical memory in MB, current ZRAM in MB, compression algorithm, and VM parameters.
-
-**2. Default State**  
-After installation, the module is **disabled by default** and does not modify the current ZRAM setup until you save and execute a config.
-
-**3. Configure and Run from the WebUI**  
-Open the WebUI, enter the target `ZRAM size (MB)`, adjust the algorithm and VM parameters, then press **`📦 Save`** to write the config or **`🚀 Run action`** to save and immediately execute the core script. The terminal-like pane at the bottom shows the current run output, and the `🌐` button switches both the UI and terminal rendering language.
-
-**4. Other Execution Paths**  
-The module can still apply automatically after the next boot delay.
-
-### ✅ v1.6.3 Changelog
-
-* Returned to the pre-Scene logic baseline based on `v1.6.1`.
-* Split the WebUI actions into `📦 Save` and `🚀 Run action`, shown side by side.
-* Added a terminal-style output pane that stays close to the original shell output format.
-* Extended terminal rendering to English when the UI language is switched.
-* Added experimental compression options: `lzo`, `lzo-rle`, `lz4k`, `zstdn`, and `zstdn_o`.
-
-### ⚠️ Notes
-
-* **Capacity Limit:** The target ZRAM size must be less than or equal to the device physical-memory limit in MB.
-* **Enablement:** The module will not take control until a config is saved and executed.
-* **Notification Permission:** On newer Android versions, you may need to manually allow notifications for `Shell/Terminal`, or a successful apply may only appear in system logs.
-* **Conflict Warning:** Other performance daemons may still override the applied ZRAM size later.
-* **Disclaimer:** Low-level kernel changes always carry risk; the author is not responsible for instability, lag, or data loss.
+GPL-3.0. See [LICENSE](LICENSE).
