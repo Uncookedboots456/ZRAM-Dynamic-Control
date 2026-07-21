@@ -15,7 +15,12 @@ read_current_algorithm() {
 }
 
 read_mem_total_mb() {
-    local kb mb
+    local reported_gb kb mb
+    reported_gb=$(getprop ro.oplus.memory.size 2>/dev/null)
+    case "$reported_gb" in
+        ''|*[!0-9]*) ;;
+        *) [ "$reported_gb" -gt 0 ] 2>/dev/null && { echo $((reported_gb * 1024)); return; } ;;
+    esac
     kb=$(awk '/MemTotal/ {print $2}' /proc/meminfo 2>/dev/null)
     case "$kb" in
         ''|*[!0-9]*) kb=1024 ;;
@@ -78,5 +83,6 @@ ui_print "- 如需启用，请进入 WebUI 保存并立即执行，或保存后�
 
 set_perm_recursive "$MODDIR" 0 0 0755 0644
 set_perm "$MODDIR/service.sh" 0 0 0755
+set_perm "$MODDIR/post-fs-data.sh" 0 0 0755
 set_perm "$MODDIR/zram_ctrl.sh" 0 0 0755
 chmod 0644 "$CONF"

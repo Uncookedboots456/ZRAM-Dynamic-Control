@@ -13,7 +13,7 @@ until [ "$(getprop sys.boot_completed)" = "1" ]; do
     sleep 2
 done
 
-sleep 30
+sleep 90
 
 if [ "$(read_conf ENABLED)" != "1" ]; then
     exit 0

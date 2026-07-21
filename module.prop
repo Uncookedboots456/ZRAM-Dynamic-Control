@@ -1,6 +1,6 @@
 id=zram_12g_uncookedboot
 name=ZRAM 动态控制核心
-version=1.7.0
-versionCode=170
+version=1.7.1
+versionCode=171
 author=UncookedBoot
 description=Scene-cooperative ZRAM controller with verified SukiSU WebUI config writes.

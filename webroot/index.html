@@ -645,9 +645,13 @@ exit 1
 
             try {
                 await resolveModulePath();
+                const declaredMemResult = await execShell('getprop ro.oplus.memory.size');
+                const declaredMemGb = Number(String(declaredMemResult.text || '').trim());
                 const memResult = await execShell('grep -m 1 MemTotal /proc/meminfo');
                 const memMatch = String(memResult.text || '').match(/\d+/);
-                const parsedMemMb = memMatch ? Math.floor(Number(memMatch[0]) / 1024) : 0;
+                const parsedMemMb = Number.isInteger(declaredMemGb) && declaredMemGb > 0
+                    ? declaredMemGb * 1024
+                    : (memMatch ? Math.floor(Number(memMatch[0]) / 1024) : 0);
                 if (Number.isFinite(parsedMemMb) && parsedMemMb > 0) {
                     memTotalMb = parsedMemMb;
                 }

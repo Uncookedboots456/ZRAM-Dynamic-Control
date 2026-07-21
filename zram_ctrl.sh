@@ -21,6 +21,12 @@ read_scene_conf() {
 }
 
 read_mem_total_mb() {
+    local reported_gb
+    reported_gb=$(getprop ro.oplus.memory.size 2>/dev/null)
+    case "$reported_gb" in
+        ''|*[!0-9]*) ;;
+        *) [ "$reported_gb" -gt 0 ] 2>/dev/null && { echo $((reported_gb * 1024)); return; } ;;
+    esac
     awk '/MemTotal/ {printf "%d", $2 / 1024}' /proc/meminfo 2>/dev/null
 }
 
@@ -118,7 +124,11 @@ scene_config_matches() {
 }
 
 scene_runtime_matches() {
-    [ "$(read_zram_size_mb)" = "$ZRAM_SIZE_MB" ] && \
+    local runtime_zram_mb
+    runtime_zram_mb=$(read_zram_size_mb)
+    { [ "$runtime_zram_mb" = "$ZRAM_SIZE_MB" ] || \
+        { [ "$(read_scene_conf zram_writeback)" = true ] && \
+            [ "$runtime_zram_mb" = "$((ZRAM_SIZE_MB + 4096))" ]; }; } && \
         [ "$(read_current_algorithm)" = "$COMP_ALGORITHM" ] && \
         [ "$(cat /proc/sys/vm/swappiness 2>/dev/null)" = "$SWAPPINESS" ] && \
         [ "$(cat /proc/sys/vm/watermark_scale_factor 2>/dev/null)" = "$WATERMARK_SCALE" ] && \
@@ -230,6 +240,9 @@ if scene_owns_zram; then
             exit 0
             ;;
         --boot)
+            if scene_config_matches; then
+                write_vm_parameters
+            fi
             if scene_config_matches && scene_runtime_matches; then
                 echo '[√] Scene 已应用 ZRAM 配置。'
                 notify_result 'ZRAM applied by Scene' "${ZRAM_SIZE_MB}MB | ${COMP_ALGORITHM}"
